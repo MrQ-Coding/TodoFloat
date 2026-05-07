@@ -1,0 +1,94 @@
+<Window x:Class="TodoFloat.Views.EditTaskDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:m="clr-namespace:TodoFloat.Models"
+        xmlns:sys="clr-namespace:System;assembly=mscorlib"
+        Title="编辑任务"
+        Width="380" Height="540"
+        WindowStartupLocation="CenterOwner"
+        Background="Transparent"
+        WindowStyle="None" AllowsTransparency="True"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize">
+    <Border Background="{StaticResource BgBrush}"
+            BorderBrush="{StaticResource BorderBrush2}"
+            BorderThickness="1" CornerRadius="14">
+        <Border.Effect>
+            <DropShadowEffect Color="Black" BlurRadius="20" ShadowDepth="0" Opacity="0.5"/>
+        </Border.Effect>
+        <DockPanel Margin="16">
+            <Grid DockPanel.Dock="Top" Height="32" Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="编辑任务" FontWeight="SemiBold" FontSize="14"
+                           VerticalAlignment="Center"/>
+                <Button Grid.Column="1" Style="{StaticResource IconButton}" Content="✕"
+                        Click="Close_Click"/>
+            </Grid>
+
+            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                        HorizontalAlignment="Right" Margin="0,12,0,0">
+                <Button Content="取消" Style="{StaticResource IconButton}"
+                        Padding="14,6" Click="Close_Click"/>
+                <Button Content="保存" Style="{StaticResource PrimaryButton}"
+                        Margin="8,0,0,0" Click="Save_Click"/>
+            </StackPanel>
+
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <TextBlock Text="标题" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,4"/>
+                    <TextBox x:Name="TitleBox"/>
+
+                    <TextBlock Text="备注" Foreground="{StaticResource MutedBrush}" Margin="0,12,0,4"/>
+                    <TextBox x:Name="NotesBox" Height="80"
+                             AcceptsReturn="True" TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto"/>
+
+                    <TextBlock Text="优先级" Foreground="{StaticResource MutedBrush}" Margin="0,12,0,4"/>
+                    <ComboBox x:Name="PriorityCombo">
+                        <ComboBoxItem Content="无" Tag="0"/>
+                        <ComboBoxItem Content="低" Tag="1"/>
+                        <ComboBoxItem Content="中" Tag="2"/>
+                        <ComboBoxItem Content="高" Tag="3"/>
+                    </ComboBox>
+
+                    <TextBlock Text="分类" Foreground="{StaticResource MutedBrush}" Margin="0,12,0,4"/>
+                    <ComboBox x:Name="CategoryCombo"
+                              DisplayMemberPath="Name" SelectedValuePath="Id"/>
+
+                    <TextBlock Text="截止时间" Foreground="{StaticResource MutedBrush}" Margin="0,12,0,4"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <DatePicker x:Name="DueDate" Background="{StaticResource PanelBrush}"
+                                    Foreground="{StaticResource TextBrush}"/>
+                        <TextBox x:Name="DueTime" Grid.Column="1" Width="70" Margin="6,0,0,0"
+                                 ToolTip="HH:mm"/>
+                        <Button Grid.Column="2" Content="清除" Style="{StaticResource IconButton}"
+                                Margin="4,0,0,0" Click="ClearDue_Click"/>
+                    </Grid>
+
+                    <TextBlock Text="提醒时间" Foreground="{StaticResource MutedBrush}" Margin="0,12,0,4"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <DatePicker x:Name="RemindDate" Background="{StaticResource PanelBrush}"
+                                    Foreground="{StaticResource TextBrush}"/>
+                        <TextBox x:Name="RemindTime" Grid.Column="1" Width="70" Margin="6,0,0,0"
+                                 ToolTip="HH:mm"/>
+                        <Button Grid.Column="2" Content="清除" Style="{StaticResource IconButton}"
+                                Margin="4,0,0,0" Click="ClearRemind_Click"/>
+                    </Grid>
+                </StackPanel>
+            </ScrollViewer>
+        </DockPanel>
+    </Border>
+</Window>

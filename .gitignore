@@ -1,0 +1,98 @@
+# ============================================================
+# .NET / WPF (Visual Studio + Rider)
+# ============================================================
+
+# Build output
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Ll]og/
+[Ll]ogs/
+artifacts/
+publish/
+PublishProfiles/
+
+# Visual Studio cache / user files
+.vs/
+*.user
+*.userprefs
+*.suo
+*.userosscache
+*.sln.docstates
+*.sln.iml
+
+# Rider / JetBrains
+.idea/
+*.DotSettings.user
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# NuGet (we use PackageReference, but cover legacy + cache)
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+!**/[Pp]ackages/build/
+project.lock.json
+project.fragment.lock.json
+
+# Test results
+[Tt]est[Rr]esult*/
+*.trx
+*.coverage
+*.coveragexml
+coverage*.json
+coverage*.xml
+coverage*.info
+BenchmarkDotNet.Artifacts/
+
+# Build server / Resharper
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.dotCover
+
+# Tooling
+*.cache
+*.tmp
+*.tmp_proj
+*.tlog
+*.log
+*.pidb
+*.svclog
+*.scc
+*.lcd
+*.vssscc
+*.vspscc
+
+# OS junk
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# ============================================================
+# Project-specific
+# ============================================================
+
+# Local sqlite (lives in %APPDATA%/TodoFloat/, but cover any stray copies)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Dev-time UI verification screenshots
+ui-check*.png
+*_check.png
+strikethrough_check*.png
+deferred_check.png
+todo_check.png
+seed_check.png
+
+# Local secrets / config
+*.env
+*.env.local
+secrets.json
+appsettings.Local.json
