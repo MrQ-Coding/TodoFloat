@@ -19,6 +19,8 @@ public partial class TaskItemViewModel : ObservableObject
     [ObservableProperty] private bool _isExpanded;
     [ObservableProperty] private bool _isAddingSubtask;
     [ObservableProperty] private string _draftSubtaskTitle = string.Empty;
+    [ObservableProperty] private bool _isInlineEditing;
+    [ObservableProperty] private string _editingTitle = string.Empty;
     [ObservableProperty] private ObservableCollection<TaskItemViewModel> _subtasks = new();
 
     public TaskItemViewModel(TodoTask t)

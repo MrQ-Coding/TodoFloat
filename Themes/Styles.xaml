@@ -96,25 +96,50 @@
     <Setter Property="FontFamily" Value="{StaticResource FontUI}"/>
     <Setter Property="FontSize" Value="12"/>
     <Setter Property="FontWeight" Value="SemiBold"/>
-    <Setter Property="Padding" Value="9,4"/>
+    <Setter Property="Padding" Value="12,6"/>
     <Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="ToggleButton">
           <Border x:Name="Bd"
                   Background="{TemplateBinding Background}"
+                  BorderBrush="Transparent"
+                  BorderThickness="1"
                   CornerRadius="7"
-                  Padding="{TemplateBinding Padding}">
-            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  Padding="{TemplateBinding Padding}"
+                  SnapsToDevicePixels="True">
+            <ContentPresenter HorizontalAlignment="Center"
+                              VerticalAlignment="Center"
+                              Margin="0,0,0,1"/>
           </Border>
           <ControlTemplate.Triggers>
+            <!-- 未选中态 hover：仿输入框样式 — 暖白底 + 主色描边 -->
+            <MultiTrigger>
+              <MultiTrigger.Conditions>
+                <Condition Property="IsMouseOver" Value="True"/>
+                <Condition Property="IsChecked" Value="False"/>
+              </MultiTrigger.Conditions>
+              <Setter TargetName="Bd" Property="Background" Value="#FFFAF7F2"/>
+              <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}"/>
+              <Setter Property="Foreground" Value="{StaticResource AccentInk}"/>
+            </MultiTrigger>
+            <!-- 选中态：浅橘底 + 主色描边 + 深橘字（柔和有质感） -->
             <Trigger Property="IsChecked" Value="True">
               <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentSoft}"/>
+              <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}"/>
               <Setter Property="Foreground" Value="{StaticResource AccentInk}"/>
             </Trigger>
-            <Trigger Property="IsMouseOver" Value="True">
-              <Setter Property="Foreground" Value="{StaticResource InkBrush}"/>
-            </Trigger>
+            <!-- 选中态再 hover：底色稍微深一档 -->
+            <MultiTrigger>
+              <MultiTrigger.Conditions>
+                <Condition Property="IsMouseOver" Value="True"/>
+                <Condition Property="IsChecked" Value="True"/>
+              </MultiTrigger.Conditions>
+              <Setter TargetName="Bd" Property="Background" Value="#FFF3CFB3"/>
+              <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}"/>
+              <Setter Property="Foreground" Value="{StaticResource AccentInk}"/>
+            </MultiTrigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
       </Setter.Value>
@@ -173,12 +198,13 @@
   <Style x:Key="TaskRow" TargetType="Border">
     <Setter Property="Background" Value="{StaticResource PanelBrush}"/>
     <Setter Property="BorderBrush" Value="{StaticResource Line2Brush}"/>
-    <Setter Property="BorderThickness" Value="0"/>
+    <Setter Property="BorderThickness" Value="1"/>
     <Setter Property="Padding" Value="6,9,10,9"/>
     <Setter Property="Cursor" Value="Hand"/>
     <Style.Triggers>
       <Trigger Property="IsMouseOver" Value="True">
         <Setter Property="Background" Value="{StaticResource RowHoverBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/>
       </Trigger>
     </Style.Triggers>
   </Style>

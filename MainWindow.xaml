@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:TodoFloat.ViewModels"
+        xmlns:ctl="clr-namespace:TodoFloat.Controls"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="TodoFloat"
         Width="{StaticResource WindowWidth}" Height="{StaticResource WindowHeight}"
@@ -30,6 +31,7 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
+            <!-- 顶栏一行搞定：tabs + 动作图标 + Win11 控制按钮 -->
             <Grid x:Name="DragBar"
                   Grid.Row="0"
                   Background="Transparent"
@@ -38,142 +40,110 @@
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <StackPanel Orientation="Horizontal" Margin="14,0,0,0" VerticalAlignment="Center">
-                    <Ellipse Style="{StaticResource TrafficDot}" Fill="#E8664E" Margin="0,0,6,0"/>
-                    <Ellipse Style="{StaticResource TrafficDot}" Fill="#E5B84B" Margin="0,0,6,0"/>
-                    <Ellipse Style="{StaticResource TrafficDot}" Fill="#62C46E"/>
-                </StackPanel>
+                <Border Grid.Column="0"
+                        Style="{StaticResource SegmentedShell}"
+                        Margin="14,4,0,4"
+                        VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                        <ToggleButton Style="{StaticResource SegmentedToggleButton}"
+                                      IsChecked="{Binding IsTodayView, Mode=TwoWay}">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="待办" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="TodayCountText"
+                                           Text="{Binding TodayCount}"
+                                           Margin="5,0,0,0"
+                                           Opacity="0.75"
+                                           FontSize="11"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </ToggleButton>
+                        <ToggleButton Style="{StaticResource SegmentedToggleButton}"
+                                      IsChecked="{Binding IsUpcomingView, Mode=TwoWay}">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="规划" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="UpcomingCountText"
+                                           Text="{Binding UpcomingCount}"
+                                           Margin="5,0,0,0"
+                                           Opacity="0.75"
+                                           FontSize="11"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </ToggleButton>
+                        <ToggleButton Style="{StaticResource SegmentedToggleButton}"
+                                      IsChecked="{Binding IsInboxView, Mode=TwoWay}">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="全部" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="InboxCountText"
+                                           Text="{Binding InboxCount}"
+                                           Margin="5,0,0,0"
+                                           Opacity="0.75"
+                                           FontSize="11"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </ToggleButton>
+                    </StackPanel>
+                </Border>
 
-                <StackPanel Grid.Column="1"
-                            Orientation="Horizontal"
-                            VerticalAlignment="Center"
-                            HorizontalAlignment="Center">
-                    <TextBlock Text="&#xE718;"
-                               FontFamily="Segoe MDL2 Assets"
-                               FontSize="11"
-                               Foreground="{StaticResource AccentBrush}"
-                               VerticalAlignment="Center"
-                               Margin="0,0,6,0"/>
-                    <TextBlock Text="Loop · 悬浮"
-                               Foreground="{StaticResource TextBrush2}"
-                               FontSize="12.5"
-                               FontWeight="SemiBold"/>
-                </StackPanel>
+                <!-- 中间空白列：拖拽区 -->
 
                 <StackPanel Grid.Column="2"
                             Orientation="Horizontal"
-                            VerticalAlignment="Center"
-                            Margin="0,0,12,0">
-                    <Button Style="{StaticResource GlyphButton}"
+                            VerticalAlignment="Top">
+                    <Button x:Name="SearchButton"
                             Content="&#xE721;"
                             ToolTip="搜索"
-                            Click="BtnSearch_Click"/>
-                    <Button x:Name="BtnPin"
-                            Style="{StaticResource GlyphButton}"
-                            Content="&#xE718;"
-                            ToolTip="置顶"
-                            Click="BtnPin_Click"/>
-                    <Button Style="{StaticResource GlyphButton}"
-                            Content="&#xE712;"
-                            ToolTip="更多"/>
-                    <Button x:Name="BtnClose"
-                            Style="{StaticResource GlyphButton}"
+                            Click="BtnSearch_Click">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource TitleIconButton}">
+                                <Style.Triggers>
+                                    <!-- 搜索模式开启时：图标变主色，提示当前是搜索状态 -->
+                                    <DataTrigger Binding="{Binding IsSearchMode}" Value="True">
+                                        <Setter Property="Foreground" Value="{StaticResource AccentInkBrush}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                    <Button x:Name="SettingsButton"
+                            Style="{StaticResource TitleIconButton}"
+                            Content="&#xE713;"
+                            ToolTip="设置"
+                            Click="BtnSettings_Click">
+                        <Button.ContextMenu>
+                            <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                <MenuItem Header="显示已完成"
+                                          IsCheckable="True"
+                                          IsChecked="{Binding ShowCompleted}"
+                                          Command="{Binding ToggleShowCompletedCommand}"/>
+                                <MenuItem Header="自动隐藏"
+                                          IsCheckable="True"
+                                          IsChecked="{Binding AutoHideEnabled}"
+                                          Command="{Binding ToggleAutoHideCommand}"/>
+                                <Separator/>
+                                <MenuItem Header="分类管理…" Click="MenuCategories_Click"/>
+                            </ContextMenu>
+                        </Button.ContextMenu>
+                    </Button>
+                </StackPanel>
+
+                <StackPanel Grid.Column="3"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Top">
+                    <Button Style="{StaticResource CaptionButton}"
+                            Content="&#xE921;"
+                            ToolTip="最小化"
+                            Click="BtnMinimize_Click"/>
+                    <Button Style="{StaticResource CaptionCloseButton}"
                             Content="&#xE8BB;"
                             ToolTip="关闭"
                             Click="BtnClose_Click"/>
                 </StackPanel>
             </Grid>
 
-            <StackPanel Grid.Row="1" Margin="16,14,16,0">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-
-                    <Border Style="{StaticResource SegmentedShell}"
-                            HorizontalAlignment="Left">
-                        <StackPanel Orientation="Horizontal">
-                            <ToggleButton Style="{StaticResource SegmentedToggleButton}"
-                                          IsChecked="{Binding IsTodayView, Mode=TwoWay}">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="待办" FontSize="12" FontWeight="SemiBold"/>
-                                    <TextBlock Text="{Binding TodayCount, StringFormat=' {0}'}"
-                                               Foreground="{StaticResource MutedBrush}"
-                                               FontSize="10.5"
-                                               VerticalAlignment="Center"/>
-                                </StackPanel>
-                            </ToggleButton>
-                            <ToggleButton Style="{StaticResource SegmentedToggleButton}"
-                                          IsChecked="{Binding IsUpcomingView, Mode=TwoWay}">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="规划" FontSize="12" FontWeight="SemiBold"/>
-                                    <TextBlock Text="{Binding UpcomingCount, StringFormat=' {0}'}"
-                                               Foreground="{StaticResource MutedBrush}"
-                                               FontSize="10.5"
-                                               VerticalAlignment="Center"/>
-                                </StackPanel>
-                            </ToggleButton>
-                            <ToggleButton Style="{StaticResource SegmentedToggleButton}"
-                                          IsChecked="{Binding IsInboxView, Mode=TwoWay}">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="全部" FontSize="12" FontWeight="SemiBold"/>
-                                    <TextBlock Text="{Binding InboxCount, StringFormat=' {0}'}"
-                                               Foreground="{StaticResource MutedBrush}"
-                                               FontSize="10.5"
-                                               VerticalAlignment="Center"/>
-                                </StackPanel>
-                            </ToggleButton>
-                        </StackPanel>
-                    </Border>
-
-                    <StackPanel Grid.Column="1" Orientation="Horizontal">
-                        <Button Style="{StaticResource GlyphButton}"
-                                Content="&#xE721;"
-                                ToolTip="搜索"
-                                Click="BtnSearch_Click"/>
-                        <Button Style="{StaticResource GlyphButton}"
-                                Content="&#xEA8F;"
-                                ToolTip="通知"/>
-                        <Button x:Name="SettingsButton"
-                                Style="{StaticResource GlyphButton}"
-                                Content="&#xE713;"
-                                ToolTip="设置"
-                                Click="BtnSettings_Click">
-                            <Button.ContextMenu>
-                                <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                                    <MenuItem Header="显示已完成"
-                                              IsCheckable="True"
-                                              IsChecked="{Binding ShowCompleted}"
-                                              Command="{Binding ToggleShowCompletedCommand}"/>
-                                    <MenuItem Header="自动隐藏"
-                                              IsCheckable="True"
-                                              IsChecked="{Binding AutoHideEnabled}"
-                                              Command="{Binding ToggleAutoHideCommand}"/>
-                                    <Separator/>
-                                    <MenuItem Header="分类管理…" Click="MenuCategories_Click"/>
-                                </ContextMenu>
-                            </Button.ContextMenu>
-                        </Button>
-                    </StackPanel>
-                </Grid>
-
-                <StackPanel Margin="0,12,0,0" HorizontalAlignment="Right">
-                    <TextBlock HorizontalAlignment="Right"
-                               Foreground="{StaticResource MutedBrush}"
-                               FontSize="11.5">
-                        <Run Text="{Binding CompletedCount}"/>
-                        <Run Text="/"/>
-                        <Run Text="{Binding TotalCount}"/>
-                        <Run Text=" 已完成"/>
-                    </TextBlock>
-                    <ProgressBar Style="{StaticResource WindowProgress}"
-                                 Value="{Binding CompletionPercent, Mode=OneWay}"
-                                 Margin="0,5,0,0"/>
-                </StackPanel>
-
+            <StackPanel Grid.Row="1" Margin="16,8,16,0">
                 <Border x:Name="NewTaskRow"
                         Style="{StaticResource QuickAddShell}"
                         Margin="0,14,0,0"
@@ -184,53 +154,63 @@
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <Button x:Name="QuickAddButton"
-                                Width="28"
-                                Height="28"
-                                VerticalAlignment="Center"
-                                Click="QuickAddButton_Click">
-                            <Button.Template>
-                                <ControlTemplate TargetType="Button">
-                                    <Grid>
-                                        <Ellipse x:Name="Circle"
-                                                 Width="22"
-                                                 Height="22"
-                                                 HorizontalAlignment="Center"
-                                                 VerticalAlignment="Center"
-                                                 Stroke="{StaticResource MutedBrush}"
-                                                 StrokeThickness="0.9"
-                                                 StrokeDashArray="2.4 2.0"
-                                                 StrokeDashCap="Round"
-                                                 Fill="Transparent"/>
-                                        <Path Data="M 0,5 L 10,5 M 5,0 L 5,10"
-                                              Stroke="{StaticResource MutedBrush}"
-                                              StrokeThickness="1.3"
-                                              StrokeStartLineCap="Round"
-                                              StrokeEndLineCap="Round"
-                                              Width="10" Height="10"
-                                              Stretch="None"
-                                              HorizontalAlignment="Center"
-                                              VerticalAlignment="Center"/>
-                                    </Grid>
-                                </ControlTemplate>
-                            </Button.Template>
-                        </Button>
 
-                        <Grid Grid.Column="1" Margin="8,0,8,0">
-                            <TextBox x:Name="NewTaskBox"
-                                     Text="{Binding QuickInput, UpdateSourceTrigger=PropertyChanged}"
-                                     KeyDown="NewTaskBox_KeyDown"
-                                     VerticalContentAlignment="Center"/>
-                            <TextBlock Text="添加任务... 今天 14:30 #工作 !!"
+                        <!-- ====== 左侧图标：添加态 = 虚线圆+号；搜索态 = 放大镜 ====== -->
+                        <Grid Grid.Column="0">
+                            <Button x:Name="QuickAddButton"
+                                    Width="28"
+                                    Height="28"
+                                    VerticalAlignment="Center"
+                                    Click="QuickAddButton_Click">
+                                <Button.Style>
+                                    <Style TargetType="Button">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                        <Style.Triggers>
+                                            <!-- Hidden 而非 Collapsed：保留 28px 高度，避免卡片整体变矮、下方任务列表错位 -->
+                                            <DataTrigger Binding="{Binding IsSearchMode}" Value="True">
+                                                <Setter Property="Visibility" Value="Hidden"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Grid>
+                                            <Ellipse x:Name="Circle"
+                                                     Width="22"
+                                                     Height="22"
+                                                     HorizontalAlignment="Center"
+                                                     VerticalAlignment="Center"
+                                                     Stroke="{StaticResource MutedBrush}"
+                                                     StrokeThickness="0.9"
+                                                     StrokeDashArray="2.4 2.0"
+                                                     StrokeDashCap="Round"
+                                                     Fill="Transparent"/>
+                                            <Path Data="M 0,5 L 10,5 M 5,0 L 5,10"
+                                                  Stroke="{StaticResource MutedBrush}"
+                                                  StrokeThickness="1.3"
+                                                  StrokeStartLineCap="Round"
+                                                  StrokeEndLineCap="Round"
+                                                  Width="10" Height="10"
+                                                  Stretch="None"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"/>
+                                        </Grid>
+                                    </ControlTemplate>
+                                </Button.Template>
+                            </Button>
+
+                            <TextBlock Text="&#xE721;"
+                                       FontFamily="Segoe MDL2 Assets"
                                        Foreground="{StaticResource MutedBrush}"
-                                       FontSize="13"
-                                       VerticalAlignment="Center"
-                                       IsHitTestVisible="False">
+                                       FontSize="14"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
                                         <Setter Property="Visibility" Value="Collapsed"/>
                                         <Style.Triggers>
-                                            <DataTrigger Binding="{Binding QuickInput}" Value="">
+                                            <DataTrigger Binding="{Binding IsSearchMode}" Value="True">
                                                 <Setter Property="Visibility" Value="Visible"/>
                                             </DataTrigger>
                                         </Style.Triggers>
@@ -239,19 +219,52 @@
                             </TextBlock>
                         </Grid>
 
+                        <!-- ====== 中间输入区：单 TextBox，占位文字按 IsSearchMode 切换 ====== -->
+                        <Grid Grid.Column="1" Margin="8,0,8,0">
+                            <TextBox x:Name="NewTaskBox"
+                                     Text="{Binding QuickInput, UpdateSourceTrigger=PropertyChanged}"
+                                     KeyDown="NewTaskBox_KeyDown"
+                                     VerticalContentAlignment="Center"/>
+                            <TextBlock Foreground="{StaticResource MutedBrush}"
+                                       FontSize="13"
+                                       VerticalAlignment="Center"
+                                       IsHitTestVisible="False">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Setter Property="Text" Value="添加任务"/>
+                                        <Style.Triggers>
+                                            <!-- 输入框为空就显示，根据 IsSearchMode 切换文案 -->
+                                            <DataTrigger Binding="{Binding QuickInput}" Value="">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsSearchMode}" Value="True">
+                                                <Setter Property="Text" Value="搜索任务..."/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
+
+                        <!-- ====== 右侧图标：搜索态用 Hidden 隐藏（保留列宽，TextBox 不重排） ====== -->
                         <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsSearchMode}" Value="True">
+                                            <Setter Property="Visibility" Value="Hidden"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </StackPanel.Style>
                             <Button Style="{StaticResource GlyphButton}"
                                     Width="22" Height="22"
                                     Content="&#xE787;"
                                     Margin="0,0,2,0"
-                                    ToolTip="日期"
+                                    ToolTip="日期与时间"
                                     Click="QuickDueButton_Click"/>
-                            <Button Style="{StaticResource GlyphButton}"
-                                    Width="22" Height="22"
-                                    Content="&#xE823;"
-                                    Margin="0,0,2,0"
-                                    ToolTip="时间"
-                                    Click="QuickTimeButton_Click"/>
                             <Button Style="{StaticResource GlyphButton}"
                                     Width="22" Height="22"
                                     Content="&#xE7C1;"
@@ -263,13 +276,6 @@
                                     Content="&#xE8EC;"
                                     Margin="0,0,4,0"
                                     Click="QuickTagButton_Click"/>
-                            <Border Background="{StaticResource PanelBrush2}"
-                                    BorderBrush="{StaticResource BorderBrushSoft}"
-                                    BorderThickness="1"
-                                    CornerRadius="4"
-                                    Padding="5,1">
-                                <TextBlock Text="Ctrl+N" FontSize="10.5" Foreground="{StaticResource MutedBrush}"/>
-                            </Border>
                         </StackPanel>
                     </Grid>
                 </Border>
@@ -280,6 +286,9 @@
                             <Setter Property="Visibility" Value="Visible"/>
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding HasQuickChips}" Value="False">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding IsSearchMode}" Value="True">
                                     <Setter Property="Visibility" Value="Collapsed"/>
                                 </DataTrigger>
                             </Style.Triggers>
@@ -366,46 +375,17 @@
                     </Border>
                 </WrapPanel>
 
-                <Grid x:Name="SearchPanel"
-                      Visibility="Collapsed"
-                      Background="Transparent"
-                      Margin="0,8,0,0">
-                    <Border Background="{StaticResource PanelBrush2}"
-                            CornerRadius="8"
-                            Padding="10,6">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="16"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="&#xE721;"
-                                       FontFamily="Segoe MDL2 Assets"
-                                       Foreground="{StaticResource MutedBrush}"
-                                       FontSize="12"
-                                       VerticalAlignment="Center"/>
-                            <TextBox x:Name="SearchBox"
-                                     Grid.Column="1"
-                                     Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged, Delay=200}"
-                                     KeyDown="SearchBox_KeyDown"
-                                     Margin="8,0,8,0"/>
-                            <Button Grid.Column="2"
-                                    Style="{StaticResource GlyphButton}"
-                                    Width="20"
-                                    Height="20"
-                                    FontSize="10"
-                                    Content="&#xE8BB;"
-                                    Click="ClearSearch_Click"/>
-                        </Grid>
-                    </Border>
-                </Grid>
+                <!-- 搜索栏已并入 NewTaskRow 上方共用 — 通过 IsSearchMode 切换可见的 TextBox / 图标 -->
+
             </StackPanel>
 
-            <ScrollViewer Grid.Row="2"
+            <ScrollViewer x:Name="MainScroller"
+                          Grid.Row="2"
                           VerticalScrollBarVisibility="Hidden"
                           HorizontalScrollBarVisibility="Disabled"
                           Padding="12,10,12,8">
-                <Grid>
+                <!-- MinHeight 绑到 viewport，让空状态可在视口内垂直居中 -->
+                <Grid MinHeight="{Binding ViewportHeight, ElementName=MainScroller}">
                     <ItemsControl ItemsSource="{Binding TaskGroups}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type vm:TaskGroupViewModel}">
@@ -523,7 +503,17 @@
                                                                         </TextBlock.Style>
                                                                     </TextBlock>
 
+                                                                    <!-- Title 下的 meta 摘要：仅折叠态显示；展开后由 chip 区接管，避免重复 -->
                                                                     <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                                                                        <StackPanel.Style>
+                                                                            <Style TargetType="StackPanel">
+                                                                                <Style.Triggers>
+                                                                                    <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                    </DataTrigger>
+                                                                                </Style.Triggers>
+                                                                            </Style>
+                                                                        </StackPanel.Style>
                                                                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
                                                                             <StackPanel.Style>
                                                                                 <Style TargetType="StackPanel">
@@ -584,6 +574,7 @@
                                                                     </StackPanel>
                                                                 </StackPanel>
 
+                                                                <!-- 右侧优先级旗：折叠态 / 展开态都显示，让标题区随时能看到优先级 -->
                                                                 <TextBlock Grid.Column="3"
                                                                            Text="&#xE7C1;"
                                                                            FontFamily="Segoe MDL2 Assets"
@@ -609,18 +600,28 @@
                                                                 BorderThickness="0,1,0,0"
                                                                 CornerRadius="{Binding DetailCornerRadius}"
                                                                 Padding="0"
+                                                                FocusVisualStyle="{x:Null}"
+                                                                Focusable="False"
                                                                 Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVisibility}}">
                                                             <Grid>
                                                                 <StackPanel Margin="46,7,14,12">
                                                                 <Grid Margin="0,0,0,8">
                                                                     <WrapPanel>
-                                                                        <Border Margin="0,0,6,6"
+                                                                        <!-- ====== 已存在的 chip：先排在前面 ====== -->
+                                                                        <!-- 日期 chip：hover 显 × 删除；DueLabel 为空时整体隐藏 -->
+                                                                        <Border x:Name="ChipDateBorder"
+                                                                                Margin="0,0,6,6"
                                                                                 MouseLeftButtonUp="ChipDate_Click">
                                                                             <StackPanel Orientation="Horizontal">
                                                                                 <TextBlock Text="&#xE787;" FontFamily="Segoe MDL2 Assets"
                                                                                            Foreground="{StaticResource MutedBrush}" FontSize="11"
                                                                                            VerticalAlignment="Center" Margin="0,0,4,0"/>
-                                                                                <TextBlock Text="{Binding DueLabel}" Foreground="{StaticResource TextBrush2}" FontSize="11.5"/>
+                                                                                <TextBlock Text="{Binding DueLabel}" Foreground="{StaticResource TextBrush2}" FontSize="11.5"
+                                                                                           VerticalAlignment="Center"/>
+                                                                                <Button Style="{StaticResource ChipCloseButton}"
+                                                                                        Click="ChipDateRemove_Click"
+                                                                                        Margin="6,0,0,0"
+                                                                                        Visibility="{Binding IsMouseOver, ElementName=ChipDateBorder, Converter={StaticResource BoolToVisibility}}"/>
                                                                             </StackPanel>
                                                                             <Border.Style>
                                                                                 <Style TargetType="Border" BasedOn="{StaticResource ClickablePill}">
@@ -633,23 +634,45 @@
                                                                             </Border.Style>
                                                                         </Border>
 
-                                                                        <Border Style="{StaticResource ClickablePill}"
+                                                                        <!-- 优先级 chip -->
+                                                                        <Border x:Name="ChipPriorityBorder"
                                                                                 Margin="0,0,6,6"
                                                                                 MouseLeftButtonUp="ChipPriority_Click">
                                                                             <StackPanel Orientation="Horizontal">
                                                                                 <TextBlock Text="&#xE7C1;" FontFamily="Segoe MDL2 Assets"
                                                                                            Foreground="{Binding PriorityBrush}" FontSize="11"
                                                                                            VerticalAlignment="Center" Margin="0,0,4,0"/>
-                                                                                <TextBlock Text="{Binding PriorityLabel}" Foreground="{StaticResource TextBrush2}" FontSize="11.5"/>
+                                                                                <TextBlock Text="{Binding PriorityLabel}" Foreground="{StaticResource TextBrush2}" FontSize="11.5"
+                                                                                           VerticalAlignment="Center"/>
+                                                                                <Button Style="{StaticResource ChipCloseButton}"
+                                                                                        Click="ChipPriorityRemove_Click"
+                                                                                        Margin="6,0,0,0"
+                                                                                        Visibility="{Binding IsMouseOver, ElementName=ChipPriorityBorder, Converter={StaticResource BoolToVisibility}}"/>
                                                                             </StackPanel>
+                                                                            <Border.Style>
+                                                                                <Style TargetType="Border" BasedOn="{StaticResource ClickablePill}">
+                                                                                    <Style.Triggers>
+                                                                                        <DataTrigger Binding="{Binding PriorityKey}" Value="none">
+                                                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                        </DataTrigger>
+                                                                                    </Style.Triggers>
+                                                                                </Style>
+                                                                            </Border.Style>
                                                                         </Border>
 
-                                                                        <Border Margin="0,0,6,6"
+                                                                        <!-- 标签 chip -->
+                                                                        <Border x:Name="ChipCategoryBorder"
+                                                                                Margin="0,0,6,6"
                                                                                 MouseLeftButtonUp="ChipCategory_Click">
                                                                             <StackPanel Orientation="Horizontal">
                                                                                 <Ellipse Width="7" Height="7" Fill="{Binding CategoryBrush}"
                                                                                          VerticalAlignment="Center" Margin="0,0,5,0"/>
-                                                                                <TextBlock Text="{Binding CategoryName}" Foreground="{StaticResource TextBrush2}" FontSize="11.5"/>
+                                                                                <TextBlock Text="{Binding CategoryName}" Foreground="{StaticResource TextBrush2}" FontSize="11.5"
+                                                                                           VerticalAlignment="Center"/>
+                                                                                <Button Style="{StaticResource ChipCloseButton}"
+                                                                                        Click="ChipCategoryRemove_Click"
+                                                                                        Margin="6,0,0,0"
+                                                                                        Visibility="{Binding IsMouseOver, ElementName=ChipCategoryBorder, Converter={StaticResource BoolToVisibility}}"/>
                                                                             </StackPanel>
                                                                             <Border.Style>
                                                                                 <Style TargetType="Border" BasedOn="{StaticResource ClickablePill}">
@@ -662,11 +685,59 @@
                                                                             </Border.Style>
                                                                         </Border>
 
-                                                                        <Border Style="{StaticResource ClickablePill}"
-                                                                                Background="Transparent"
+                                                                        <!-- ====== 占位符：所有 "+" 按钮排在已有 chip 后面 ====== -->
+                                                                        <Border Background="Transparent"
+                                                                                BorderBrush="{StaticResource BorderBrushSoft}"
+                                                                                Margin="0,0,6,6"
+                                                                                MouseLeftButtonUp="ChipDate_Click">
+                                                                            <Border.Style>
+                                                                                <Style TargetType="Border" BasedOn="{StaticResource ClickablePill}">
+                                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                    <Style.Triggers>
+                                                                                        <DataTrigger Binding="{Binding DueLabel}" Value="">
+                                                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                                                        </DataTrigger>
+                                                                                    </Style.Triggers>
+                                                                                </Style>
+                                                                            </Border.Style>
+                                                                            <TextBlock Text="+ 日期"
+                                                                                       Foreground="{StaticResource MutedBrush}"
+                                                                                       FontSize="11.5"/>
+                                                                        </Border>
+
+                                                                        <Border Background="Transparent"
+                                                                                BorderBrush="{StaticResource BorderBrushSoft}"
+                                                                                Margin="0,0,6,6"
+                                                                                MouseLeftButtonUp="ChipPriority_Click">
+                                                                            <Border.Style>
+                                                                                <Style TargetType="Border" BasedOn="{StaticResource ClickablePill}">
+                                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                    <Style.Triggers>
+                                                                                        <DataTrigger Binding="{Binding PriorityKey}" Value="none">
+                                                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                                                        </DataTrigger>
+                                                                                    </Style.Triggers>
+                                                                                </Style>
+                                                                            </Border.Style>
+                                                                            <TextBlock Text="+ 优先级"
+                                                                                       Foreground="{StaticResource MutedBrush}"
+                                                                                       FontSize="11.5"/>
+                                                                        </Border>
+
+                                                                        <Border Background="Transparent"
                                                                                 BorderBrush="{StaticResource BorderBrushSoft}"
                                                                                 Margin="0,0,6,6"
                                                                                 MouseLeftButtonUp="ChipCategory_Click">
+                                                                            <Border.Style>
+                                                                                <Style TargetType="Border" BasedOn="{StaticResource ClickablePill}">
+                                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                    <Style.Triggers>
+                                                                                        <DataTrigger Binding="{Binding CategoryName}" Value="{x:Null}">
+                                                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                                                        </DataTrigger>
+                                                                                    </Style.Triggers>
+                                                                                </Style>
+                                                                            </Border.Style>
                                                                             <TextBlock Text="+ 标签"
                                                                                        Foreground="{StaticResource MutedBrush}"
                                                                                        FontSize="11.5"/>
@@ -701,20 +772,45 @@
                                                                                LineHeight="18"/>
                                                                 </Border>
 
-                                                                <ItemsControl ItemsSource="{Binding Subtasks}">
+                                                                <ItemsControl ItemsSource="{Binding Subtasks}"
+                                                                              FocusVisualStyle="{x:Null}">
                                                                     <ItemsControl.ItemTemplate>
                                                                         <DataTemplate DataType="{x:Type vm:TaskItemViewModel}">
-                                                                            <Border CornerRadius="6"
-                                                                                    Padding="4,3"
+                                                                            <Border x:Name="SubRow"
+                                                                                    FocusVisualStyle="{x:Null}"
                                                                                     MouseRightButtonUp="TaskRow_RightClick"
                                                                                     Tag="{Binding}">
                                                                                 <Border.Style>
                                                                                     <Style TargetType="Border">
                                                                                         <Setter Property="Background" Value="Transparent"/>
+                                                                                        <Setter Property="BorderBrush" Value="Transparent"/>
+                                                                                        <Setter Property="BorderThickness" Value="1"/>
+                                                                                        <Setter Property="CornerRadius" Value="6"/>
+                                                                                        <Setter Property="Padding" Value="4,3"/>
                                                                                         <Style.Triggers>
+                                                                                            <!-- 普通 hover：半透明黑叠加 -->
                                                                                             <Trigger Property="IsMouseOver" Value="True">
-                                                                                                <Setter Property="Background" Value="{StaticResource RowHoverBrush}"/>
+                                                                                                <Setter Property="Background" Value="#14000000"/>
                                                                                             </Trigger>
+                                                                                            <!-- 编辑态：仿添加子任务的白卡 -->
+                                                                                            <DataTrigger Binding="{Binding IsInlineEditing}" Value="True">
+                                                                                                <Setter Property="Background" Value="{StaticResource PanelBrush}"/>
+                                                                                                <Setter Property="BorderBrush" Value="{StaticResource LineBrush}"/>
+                                                                                                <Setter Property="CornerRadius" Value="8"/>
+                                                                                                <Setter Property="Padding" Value="5,2"/>
+                                                                                            </DataTrigger>
+                                                                                            <!-- 编辑态聚焦：主色描边 + 焦点光晕 -->
+                                                                                            <MultiDataTrigger>
+                                                                                                <MultiDataTrigger.Conditions>
+                                                                                                    <Condition Binding="{Binding IsInlineEditing}" Value="True"/>
+                                                                                                    <Condition Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource Self}}" Value="True"/>
+                                                                                                </MultiDataTrigger.Conditions>
+                                                                                                <Setter Property="Background" Value="{StaticResource PanelBrush}"/>
+                                                                                                <Setter Property="BorderBrush" Value="{StaticResource Accent}"/>
+                                                                                                <Setter Property="CornerRadius" Value="8"/>
+                                                                                                <Setter Property="Padding" Value="5,2"/>
+                                                                                                <Setter Property="Effect" Value="{StaticResource ShadowFocus}"/>
+                                                                                            </MultiDataTrigger>
                                                                                         </Style.Triggers>
                                                                                     </Style>
                                                                                 </Border.Style>
@@ -722,7 +818,7 @@
                                                                                     <Grid.ColumnDefinitions>
                                                                                         <ColumnDefinition Width="12"/>
                                                                                         <ColumnDefinition Width="*"/>
-                                                                                        <ColumnDefinition Width="Auto"/>
+                                                                                        <ColumnDefinition Width="22"/>
                                                                                     </Grid.ColumnDefinitions>
                                                                                     <CheckBox Style="{StaticResource RoundCheckBox}"
                                                                                               Width="12" Height="12"
@@ -730,35 +826,74 @@
                                                                                               Tag="{Binding PriorityKey}"
                                                                                               Click="CompleteCheckbox_Click"
                                                                                               VerticalAlignment="Center"/>
-                                                                                    <TextBlock Grid.Column="1"
-                                                                                               Text="{Binding Title}"
-                                                                                               Margin="8,0,8,0"
-                                                                                               VerticalAlignment="Center">
-                                                                                        <TextBlock.Style>
-                                                                                            <Style TargetType="TextBlock" BasedOn="{StaticResource TaskTitleText}">
-                                                                                                <Setter Property="FontSize" Value="12"/>
-                                                                                                <Setter Property="LineHeight" Value="16"/>
+
+                                                                                    <!-- 标题：非编辑态显示 TextBlock，编辑态显示 TextBox -->
+                                                                                    <Grid Grid.Column="1" Margin="8,0,8,0">
+                                                                                        <TextBlock Text="{Binding Title}"
+                                                                                                   VerticalAlignment="Center"
+                                                                                                   Cursor="IBeam"
+                                                                                                   MouseLeftButtonUp="SubtaskTitle_Click">
+                                                                                            <TextBlock.Style>
+                                                                                                <Style TargetType="TextBlock" BasedOn="{StaticResource TaskTitleText}">
+                                                                                                    <Setter Property="FontSize" Value="13"/>
+                                                                                                    <Setter Property="LineHeight" Value="18"/>
+                                                                                                    <Style.Triggers>
+                                                                                                        <DataTrigger Binding="{Binding Completed}" Value="True">
+                                                                                                            <Setter Property="TextDecorations" Value="{StaticResource StrikethroughCentered}"/>
+                                                                                                            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                                                                                                        </DataTrigger>
+                                                                                                        <DataTrigger Binding="{Binding IsInlineEditing}" Value="True">
+                                                                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                                        </DataTrigger>
+                                                                                                    </Style.Triggers>
+                                                                                                </Style>
+                                                                                            </TextBlock.Style>
+                                                                                        </TextBlock>
+                                                                                        <TextBox Text="{Binding EditingTitle, UpdateSourceTrigger=PropertyChanged}"
+                                                                                                 FontSize="13"
+                                                                                                 Padding="2,0"
+                                                                                                 BorderThickness="0"
+                                                                                                 Background="Transparent"
+                                                                                                 VerticalContentAlignment="Center"
+                                                                                                 KeyDown="SubtaskEdit_KeyDown"
+                                                                                                 LostFocus="SubtaskEdit_LostFocus"
+                                                                                                 IsVisibleChanged="SubtaskEdit_IsVisibleChanged">
+                                                                                            <TextBox.Style>
+                                                                                                <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+                                                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                                    <Style.Triggers>
+                                                                                                        <DataTrigger Binding="{Binding IsInlineEditing}" Value="True">
+                                                                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                                                                        </DataTrigger>
+                                                                                                    </Style.Triggers>
+                                                                                                </Style>
+                                                                                            </TextBox.Style>
+                                                                                        </TextBox>
+                                                                                    </Grid>
+
+                                                                                    <!-- 删除按钮：固定 22px 宽位，hover 才浮出，不引起重排；编辑态隐藏 -->
+                                                                                    <Button Grid.Column="2"
+                                                                                            Width="20" Height="20" FontSize="10"
+                                                                                            Content="&#xE74D;"
+                                                                                            Command="{Binding DataContext.DeleteCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                                            CommandParameter="{Binding}">
+                                                                                        <Button.Style>
+                                                                                            <Style TargetType="Button" BasedOn="{StaticResource GlyphButton}">
+                                                                                                <Setter Property="Opacity" Value="0"/>
+                                                                                                <Setter Property="IsHitTestVisible" Value="False"/>
                                                                                                 <Style.Triggers>
-                                                                                                    <DataTrigger Binding="{Binding Completed}" Value="True">
-                                                                                                        <Setter Property="TextDecorations" Value="{StaticResource StrikethroughCentered}"/>
-                                                                                                        <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                                                                                                    <DataTrigger Binding="{Binding IsMouseOver, ElementName=SubRow}" Value="True">
+                                                                                                        <Setter Property="Opacity" Value="1"/>
+                                                                                                        <Setter Property="IsHitTestVisible" Value="True"/>
+                                                                                                    </DataTrigger>
+                                                                                                    <DataTrigger Binding="{Binding IsInlineEditing}" Value="True">
+                                                                                                        <Setter Property="Opacity" Value="0"/>
+                                                                                                        <Setter Property="IsHitTestVisible" Value="False"/>
                                                                                                     </DataTrigger>
                                                                                                 </Style.Triggers>
                                                                                             </Style>
-                                                                                        </TextBlock.Style>
-                                                                                    </TextBlock>
-                                                                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                                                                                        <Button Style="{StaticResource GlyphButton}"
-                                                                                                Width="20" Height="20" FontSize="10"
-                                                                                                Content="&#xE70F;"
-                                                                                                Command="{Binding DataContext.EditCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                                                CommandParameter="{Binding}"/>
-                                                                                        <Button Style="{StaticResource GlyphButton}"
-                                                                                                Width="20" Height="20" FontSize="10"
-                                                                                                Content="&#xE74D;"
-                                                                                                Command="{Binding DataContext.DeleteCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                                                                CommandParameter="{Binding}"/>
-                                                                                    </StackPanel>
+                                                                                        </Button.Style>
+                                                                                    </Button>
                                                                                 </Grid>
                                                                             </Border>
                                                                         </DataTemplate>
@@ -838,7 +973,7 @@
                                                                                      Padding="0,2"
                                                                                      BorderThickness="0"
                                                                                      Background="Transparent"
-                                                                                     FontSize="12"
+                                                                                     FontSize="13"
                                                                                      VerticalAlignment="Center"
                                                                                      Text="{Binding DraftSubtaskTitle, UpdateSourceTrigger=PropertyChanged}"
                                                                                      KeyDown="NewSubtaskBox_KeyDown"
@@ -861,16 +996,11 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
 
-                    <Border Background="{StaticResource PanelBrush}"
-                            BorderBrush="{StaticResource BorderBrushSoft}"
-                            BorderThickness="1"
-                            CornerRadius="12"
-                            Padding="18"
-                            HorizontalAlignment="Stretch"
-                            VerticalAlignment="Top"
-                            Margin="0,20,0,0">
-                        <Border.Style>
-                            <Style TargetType="Border">
+                    <StackPanel HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Margin="0,80,0,40">
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
                                 <Setter Property="Visibility" Value="Visible"/>
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding HasTaskGroups}" Value="True">
@@ -878,19 +1008,33 @@
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
-                        </Border.Style>
-                        <StackPanel HorizontalAlignment="Center">
-                            <TextBlock Text="{Binding EmptyTitle}"
-                                       FontSize="14"
-                                       FontWeight="SemiBold"
-                                       HorizontalAlignment="Center"/>
-                            <TextBlock Text="从上方快速添加一项。"
-                                       Foreground="{StaticResource MutedBrush}"
-                                       FontSize="12"
-                                       Margin="0,4,0,0"
-                                       HorizontalAlignment="Center"/>
-                        </StackPanel>
-                    </Border>
+                        </StackPanel.Style>
+
+                        <!-- 装饰性图标徽章：浅橘圆底 + 主色描线打勾 -->
+                        <Border Width="60" Height="60"
+                                CornerRadius="30"
+                                Background="{StaticResource AccentSoftBrush}"
+                                HorizontalAlignment="Center">
+                            <TextBlock Text="&#xE73E;"
+                                       FontFamily="Segoe MDL2 Assets"
+                                       FontSize="26"
+                                       Foreground="{StaticResource AccentInkBrush}"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"/>
+                        </Border>
+
+                        <TextBlock Text="{Binding EmptyTitle}"
+                                   FontSize="15"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource Ink2Brush}"
+                                   Margin="0,18,0,0"
+                                   HorizontalAlignment="Center"/>
+                        <TextBlock Text="从上方添加一项任务开始记录"
+                                   Foreground="{StaticResource Ink3Brush}"
+                                   FontSize="12"
+                                   Margin="0,6,0,0"
+                                   HorizontalAlignment="Center"/>
+                    </StackPanel>
                 </Grid>
             </ScrollViewer>
 
@@ -899,23 +1043,20 @@
                     BorderBrush="{StaticResource BorderBrushSoft}"
                     BorderThickness="0,1,0,0"
                     CornerRadius="0,0,18,18"
-                    ClipToBounds="True"
-                    Padding="12,8">
-                <ScrollViewer x:Name="CategoryFilterScrollViewer"
-                              HorizontalScrollBarVisibility="Hidden"
-                              VerticalScrollBarVisibility="Disabled"
-                              PanningMode="HorizontalOnly"
-                              PreviewMouseWheel="CategoryFilterScrollViewer_PreviewMouseWheel">
-                    <ItemsControl ItemsSource="{Binding CategoryFilters}">
+                    Padding="10,6">
+                <Grid>
+                    <!-- 单行自适应：按数量降序排列；放不下的不渲染，但 OverflowHidePanel 会留出 30px 给右侧的 "…" -->
+                    <ItemsControl x:Name="CategoryFilterStrip"
+                                  ItemsSource="{Binding CategoryFilters}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
-                                <StackPanel Orientation="Horizontal"/>
+                                <ctl:OverflowHidePanel OverflowIndicatorWidth="34"/>
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type vm:CategoryFilterViewModel}">
                                 <Button Style="{StaticResource CategoryPillButton}"
-                                        Margin="0,0,4,0"
+                                        Margin="0,2,4,2"
                                         Command="{Binding DataContext.SelectCategoryFilterCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                         CommandParameter="{Binding}">
                                     <StackPanel Orientation="Horizontal">
@@ -933,20 +1074,109 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                </ScrollViewer>
+
+                    <!-- 溢出指示器：贴右边、低存在感的三点；hover 时变 Accent 色，不出现明显的胶囊框 -->
+                    <Button x:Name="CategoryMoreButton"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center"
+                            Width="32"
+                            Height="22"
+                            Visibility="Collapsed"
+                            Click="CategoryMoreButton_Click"
+                            Cursor="Hand"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Focusable="False">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="Bd"
+                                        Background="Transparent"
+                                        CornerRadius="6">
+                                    <StackPanel Orientation="Horizontal"
+                                                VerticalAlignment="Center"
+                                                HorizontalAlignment="Center">
+                                        <Ellipse x:Name="D1" Width="3" Height="3" Fill="{StaticResource Ink3Brush}" Margin="0,0,3,0" VerticalAlignment="Center"/>
+                                        <Ellipse x:Name="D2" Width="3" Height="3" Fill="{StaticResource Ink3Brush}" Margin="0,0,3,0" VerticalAlignment="Center"/>
+                                        <Ellipse x:Name="D3" Width="3" Height="3" Fill="{StaticResource Ink3Brush}" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Bd" Property="Background" Value="#10000000"/>
+                                        <Setter TargetName="D1" Property="Fill" Value="{StaticResource AccentInkBrush}"/>
+                                        <Setter TargetName="D2" Property="Fill" Value="{StaticResource AccentInkBrush}"/>
+                                        <Setter TargetName="D3" Property="Fill" Value="{StaticResource AccentInkBrush}"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                </Grid>
             </Border>
+
+            <!-- 溢出分类下拉：列出当前隐藏的分类 -->
+            <Popup x:Name="CategoryOverflowPopup"
+                   AllowsTransparency="True"
+                   PopupAnimation="Fade"
+                   StaysOpen="False"
+                   Placement="Top"
+                   PlacementTarget="{Binding ElementName=CategoryMoreButton}">
+                <Border Background="{StaticResource PanelBrush}"
+                        BorderBrush="{StaticResource BorderBrushSoft}"
+                        BorderThickness="1"
+                        CornerRadius="10"
+                        Padding="6"
+                        MinWidth="160">
+                    <ItemsControl x:Name="CategoryOverflowList">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Vertical"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:CategoryFilterViewModel}">
+                                <Button Style="{StaticResource QuickFlyoutButton}"
+                                        Click="CategoryOverflowItem_Click"
+                                        Tag="{Binding}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Ellipse Width="8" Height="8"
+                                                 Fill="{Binding Brush}"
+                                                 VerticalAlignment="Center"
+                                                 Margin="0,0,8,0"/>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding Name}"
+                                                   FontSize="12"
+                                                   VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="2"
+                                                   Text="{Binding Count}"
+                                                   Foreground="{StaticResource MutedBrush}"
+                                                   FontSize="11"
+                                                   VerticalAlignment="Center"
+                                                   Margin="8,0,0,0"/>
+                                    </Grid>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Border>
+            </Popup>
 
             <Popup x:Name="QuickFlyout"
                    AllowsTransparency="True"
                    PopupAnimation="Fade"
                    StaysOpen="False"
                    Placement="Bottom">
+                <!-- 透明 popup 里不挂 DropShadowEffect：渲染面是矩形，shadow 会被 clip 出方框 -->
                 <Border Background="{StaticResource PanelBrush}"
                         BorderBrush="{StaticResource BorderBrushSoft}"
                         BorderThickness="1"
                         CornerRadius="11"
-                        Padding="6"
-                        Effect="{StaticResource ShadowSoft}">
+                        Padding="6">
                     <ContentControl x:Name="QuickFlyoutContent"/>
                 </Border>
             </Popup>

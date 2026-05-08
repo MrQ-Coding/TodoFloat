@@ -2,84 +2,255 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="分类管理"
-        Width="360" Height="440"
+        Width="280" Height="340"
         WindowStartupLocation="CenterOwner"
         Background="Transparent"
-        WindowStyle="None" AllowsTransparency="True"
+        WindowStyle="None" AllowsTransparency="False"
         ShowInTaskbar="False"
         ResizeMode="NoResize">
-    <Border Background="{StaticResource BgBrush}"
-            BorderBrush="{StaticResource BorderBrush2}"
-            BorderThickness="1" CornerRadius="14">
-        <Border.Effect>
-            <DropShadowEffect Color="Black" BlurRadius="20" ShadowDepth="0" Opacity="0.5"/>
-        </Border.Effect>
-        <DockPanel Margin="16">
-            <Grid DockPanel.Dock="Top" Height="32" Margin="0,0,0,8">
+    <Border Background="{StaticResource BgBrush}">
+        <Grid Margin="0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- 顶部标题栏 -->
+            <Grid Grid.Row="0" Margin="14,10,8,6">
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="分类" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center"/>
-                <Button Grid.Column="1" Style="{StaticResource IconButton}" Content="✕"
+                <TextBlock Grid.Column="0"
+                           Text="&#xE8EC;"
+                           FontFamily="Segoe MDL2 Assets"
+                           FontSize="12"
+                           Foreground="{StaticResource AccentBrush}"
+                           VerticalAlignment="Center"
+                           Margin="0,0,7,0"/>
+                <TextBlock Grid.Column="1"
+                           Text="分类管理"
+                           FontWeight="SemiBold"
+                           FontSize="13"
+                           Foreground="{StaticResource TextBrush}"
+                           VerticalAlignment="Center"/>
+                <Button Grid.Column="2"
+                        Style="{StaticResource GlyphButton}"
+                        Content="&#xE8BB;"
+                        FontSize="10"
+                        Width="22" Height="22"
                         Click="Close_Click"/>
             </Grid>
 
-            <Grid DockPanel.Dock="Bottom" Margin="0,8,0,0">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <TextBox x:Name="NewNameBox"/>
-                <TextBox x:Name="NewColorBox" Grid.Column="1" Width="80" Margin="6,0,0,0"
-                         Text="#7E57C2" ToolTip="颜色 #RRGGBB"/>
-                <Button Grid.Column="2" Style="{StaticResource PrimaryButton}"
-                        Content="添加" Margin="6,0,0,0" Click="Add_Click"/>
-            </Grid>
+            <!-- 分类列表 -->
+            <ScrollViewer Grid.Row="1"
+                          VerticalScrollBarVisibility="Hidden"
+                          Margin="8,0,8,0">
+                <ItemsControl x:Name="CatList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border x:Name="Row"
+                                    CornerRadius="7"
+                                    Padding="10,7"
+                                    Margin="0,1">
+                                <!-- 注意：默认 Background 必须放进 Style.Setters；
+                                     直接写 Background="Transparent" 会成为本地值，优先级高于 Style.Trigger，导致 hover 不生效 -->
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="Transparent"/>
+                                        <Style.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter Property="Background" Value="{StaticResource AccentSoftBrush}"/>
+                                            </Trigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="24"/>
+                                    </Grid.ColumnDefinitions>
 
-            <ListBox x:Name="CatList" Background="Transparent" BorderThickness="0">
-                <ListBox.ItemContainerStyle>
-                    <Style TargetType="ListBoxItem">
-                        <Setter Property="Padding" Value="0"/>
-                        <Setter Property="Background" Value="Transparent"/>
-                        <Setter Property="Template">
-                            <Setter.Value>
-                                <ControlTemplate TargetType="ListBoxItem">
-                                    <Border Background="{TemplateBinding Background}" CornerRadius="6"
-                                            Padding="6,4">
-                                        <ContentPresenter/>
-                                    </Border>
-                                </ControlTemplate>
-                            </Setter.Value>
-                        </Setter>
-                        <Style.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Background" Value="{StaticResource HoverBrush}"/>
-                            </Trigger>
-                        </Style.Triggers>
-                    </Style>
-                </ListBox.ItemContainerStyle>
-                <ListBox.ItemTemplate>
-                    <DataTemplate>
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <Ellipse Width="12" Height="12" Margin="0,0,8,0">
-                                <Ellipse.Fill>
-                                    <SolidColorBrush Color="{Binding Color, FallbackValue=#7E57C2}"/>
-                                </Ellipse.Fill>
-                            </Ellipse>
-                            <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center"/>
-                            <Button Grid.Column="2" Style="{StaticResource IconButton}" Content="🗑"
-                                    Tag="{Binding}" Click="Delete_Click"/>
-                        </Grid>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
-        </DockPanel>
+                                    <Grid Grid.Column="0" Width="13" Height="13" Margin="0,0,11,0" VerticalAlignment="Center">
+                                        <Ellipse>
+                                            <Ellipse.Fill>
+                                                <SolidColorBrush Color="{Binding Color, FallbackValue=#7E57C2}"/>
+                                            </Ellipse.Fill>
+                                        </Ellipse>
+                                        <Ellipse Stroke="#10000000" StrokeThickness="1"/>
+                                    </Grid>
+
+                                    <TextBlock Grid.Column="1"
+                                               Text="{Binding Name}"
+                                               FontSize="12.5"
+                                               Foreground="{StaticResource TextBrush}"
+                                               VerticalAlignment="Center"/>
+
+                                    <Button Grid.Column="2"
+                                            Content="&#xE74D;"
+                                            FontFamily="Segoe MDL2 Assets"
+                                            FontSize="11"
+                                            Width="22" Height="22"
+                                            Background="Transparent"
+                                            BorderThickness="0"
+                                            Foreground="{StaticResource MutedBrush}"
+                                            Cursor="Hand"
+                                            Tag="{Binding}"
+                                            Click="Delete_Click">
+                                        <Button.Style>
+                                            <Style TargetType="Button">
+                                                <Setter Property="Opacity" Value="0"/>
+                                                <Setter Property="IsHitTestVisible" Value="False"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsMouseOver, ElementName=Row}" Value="True">
+                                                        <Setter Property="Opacity" Value="1"/>
+                                                        <Setter Property="IsHitTestVisible" Value="True"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                        <Button.Template>
+                                            <ControlTemplate TargetType="Button">
+                                                <Border x:Name="Bd"
+                                                        Background="{TemplateBinding Background}"
+                                                        CornerRadius="5">
+                                                    <TextBlock Text="{TemplateBinding Content}"
+                                                               FontFamily="{TemplateBinding FontFamily}"
+                                                               FontSize="{TemplateBinding FontSize}"
+                                                               Foreground="{TemplateBinding Foreground}"
+                                                               HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center"/>
+                                                </Border>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="Bd" Property="Background" Value="#22D85A45"/>
+                                                        <Setter Property="Foreground" Value="{StaticResource DangerBrush}"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Button.Template>
+                                    </Button>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+
+            <!-- 分隔线 -->
+            <Border Grid.Row="2"
+                    Height="1"
+                    Background="{StaticResource BorderBrushSoft}"
+                    Margin="12,8,12,0"/>
+
+            <!-- 添加新分类（无按钮，按 Enter 提交） -->
+            <Grid Grid.Row="3" Margin="12,10,12,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <Button x:Name="ColorSwatchButton"
+                        Grid.Column="0"
+                        Width="28" Height="28"
+                        Margin="0,0,8,0"
+                        Cursor="Hand"
+                        Click="ColorSwatch_Click">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Outer"
+                                    Background="{StaticResource Panel2Brush}"
+                                    BorderBrush="{StaticResource BorderBrushSoft}"
+                                    BorderThickness="1"
+                                    CornerRadius="7">
+                                <Grid Width="13" Height="13">
+                                    <Ellipse Fill="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"/>
+                                    <Ellipse Stroke="#10000000" StrokeThickness="1"/>
+                                </Grid>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Outer" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                    <Setter TargetName="Outer" Property="Background" Value="{StaticResource PanelBrush}"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+
+                <Popup x:Name="ColorPopup"
+                       PlacementTarget="{Binding ElementName=ColorSwatchButton}"
+                       Placement="Top"
+                       VerticalOffset="-6"
+                       AllowsTransparency="True"
+                       PopupAnimation="Fade"
+                       StaysOpen="False">
+                    <!-- 不在 Popup 里加 DropShadowEffect：透明 popup 的渲染面是矩形，
+                         shadow 会被 clip 出方形外框。靠 1px 描边 + panel 背景就足以分离 -->
+                    <Border Background="{StaticResource PanelBrush}"
+                            BorderBrush="{StaticResource BorderBrushSoft}"
+                            BorderThickness="1"
+                            CornerRadius="9"
+                            Padding="8">
+                        <UniformGrid x:Name="ColorGrid" Columns="3" Rows="2"/>
+                    </Border>
+                </Popup>
+
+                <!-- 名称输入：与色板按钮同款 hover/focus 高亮
+                     默认 Background/BorderBrush/BorderThickness/CornerRadius 必须挂在 Style.Setters 里，
+                     否则会成为本地值，覆盖掉 Trigger 的 Setter，hover 时颜色不会变 -->
+                <Border Grid.Column="1">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Background" Value="{StaticResource Panel2Brush}"/>
+                            <Setter Property="BorderBrush" Value="{StaticResource BorderBrushSoft}"/>
+                            <Setter Property="BorderThickness" Value="1"/>
+                            <Setter Property="CornerRadius" Value="7"/>
+                            <Style.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                    <Setter Property="Background" Value="{StaticResource PanelBrush}"/>
+                                </Trigger>
+                                <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                    <Setter Property="Background" Value="{StaticResource PanelBrush}"/>
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <Grid>
+                        <TextBox x:Name="NewNameBox"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 Height="28"
+                                 VerticalContentAlignment="Center"
+                                 Padding="10,0"
+                                 FontSize="12.5"
+                                 KeyDown="NewNameBox_KeyDown"/>
+                        <TextBlock Text="新分类名称…按 Enter 添加"
+                                   Foreground="{StaticResource MutedBrush}"
+                                   FontSize="12"
+                                   VerticalAlignment="Center"
+                                   Margin="11,0,0,0"
+                                   IsHitTestVisible="False">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Text, ElementName=NewNameBox}" Value="">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
     </Border>
 </Window>

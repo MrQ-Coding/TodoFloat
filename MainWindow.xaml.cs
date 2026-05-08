@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Windows;
@@ -8,6 +9,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using TodoFloat.Controls;
 using TodoFloat.Services;
 using TodoFloat.ViewModels;
 
@@ -22,6 +24,13 @@ public partial class MainWindow : Window
     private DateTime _quickCalendarMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
     private CalendarPickerMode _calendarMode = CalendarPickerMode.Day;
     private int _yearGridStart = (DateTime.Today.Year / 12) * 12;
+
+    // 合并面板里日历的 host：日历内的"年/月"切换只重渲染日历区，不动整个面板（不影响时间选择器）
+    private ContentControl? _calendarHost;
+
+    // 底部分类筛选条的溢出面板引用 + 当前隐藏项快照
+    private OverflowHidePanel? _categoryOverflowPanel;
+    private System.Collections.Generic.List<CategoryFilterViewModel> _hiddenCategoryFilters = new();
 
     private enum CalendarPickerMode { Day, Month, Year }
 
@@ -48,16 +57,19 @@ public partial class MainWindow : Window
 
         SourceInitialized += MainWindow_SourceInitialized;
         LocationChanged += (_, _) => _saveDebounce.Restart();
-        SizeChanged += (_, _) => _saveDebounce.Restart();
+        SizeChanged += (_, _) => { _saveDebounce.Restart(); ApplyResponsiveTopBar(); };
         PreviewMouseDown += MainWindow_PreviewMouseDown;
         MouseLeftButtonDown += MainWindow_MouseLeftButtonDown;
         KeyDown += MainWindow_KeyDown;
         Closing += MainWindow_Closing;
+        StateChanged += MainWindow_StateChanged;
 
         Loaded += (_, _) =>
         {
             RestoreWindowBounds();
             _autoHideTimer.Start();
+            HookCategoryOverflowPanel();
+            ApplyResponsiveTopBar();
         };
     }
 
@@ -99,7 +111,18 @@ public partial class MainWindow : Window
 
     private void MainWindow_PreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (IsInside(e.OriginalSource as DependencyObject, NewTaskRow)) return;
+        var src = e.OriginalSource as DependencyObject;
+
+        // 搜索模式下：点击输入卡之外任何地方都退出搜索
+        // 例外：标题栏的 🔍 按钮自身（它的 Click 会自己 toggle）
+        if (_vm.IsSearchMode
+            && !IsInside(src, NewTaskRow)
+            && (SearchButton == null || !IsInside(src, SearchButton)))
+        {
+            _vm.IsSearchMode = false;
+        }
+
+        if (IsInside(src, NewTaskRow)) return;
 
         if (NewTaskBox.IsKeyboardFocusWithin)
         {
@@ -131,7 +154,9 @@ public partial class MainWindow : Window
     {
         while (d != null)
         {
-            if (d is Button) return false;
+            // ButtonBase 涵盖 Button、ToggleButton、RadioButton 等所有可点击控件，
+            // 顶栏现在直接放了 tabs 用的 ToggleButton，必须把这些点击事件让出来。
+            if (d is System.Windows.Controls.Primitives.ButtonBase) return false;
             if (d is Grid g && g.Name == "DragBar") return true;
             d = System.Windows.Media.VisualTreeHelper.GetParent(d);
         }
@@ -255,13 +280,34 @@ public partial class MainWindow : Window
     {
         if (e.Key == Key.Enter)
         {
+            // 搜索模式下不创建任务（搜索是 live 的，Enter 不需要做事）
+            if (_vm.IsSearchMode)
+            {
+                e.Handled = true;
+                return;
+            }
             SubmitQuickAddOrFocus();
             e.Handled = true;
         }
         else if (e.Key == Key.Escape)
         {
-            _vm.QuickInput = string.Empty;
-            Keyboard.ClearFocus();
+            if (_vm.IsSearchMode)
+            {
+                // 第一次 Esc：有内容就清空（保留搜索模式）；第二次 Esc：退出搜索
+                if (!string.IsNullOrEmpty(_vm.QuickInput))
+                {
+                    _vm.QuickInput = string.Empty;
+                }
+                else
+                {
+                    _vm.IsSearchMode = false;
+                }
+            }
+            else
+            {
+                _vm.QuickInput = string.Empty;
+                Keyboard.ClearFocus();
+            }
             e.Handled = true;
         }
     }
@@ -295,11 +341,13 @@ public partial class MainWindow : Window
     {
         if (sender is not Button button) return;
 
-        // Reset to today on every open — previous navigation is intentionally discarded
-        _quickCalendarMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
-        _yearGridStart = (DateTime.Today.Year / 12) * 12;
+        // 起始月份：优先用已有 chip 的月份，没有就用今天
+        var anchor = _vm.CurrentChipDue ?? DateTime.Today;
+        _quickCalendarMonth = new DateTime(anchor.Year, anchor.Month, 1);
+        _yearGridStart = (anchor.Year / 12) * 12;
         _calendarMode = CalendarPickerMode.Day;
-        OpenQuickAddFlyout(button, CreateQuickCalendarPanel());
+        InitTimePickerSelection();
+        OpenQuickAddFlyout(button, CreateQuickDateTimePanel());
         e.Handled = true;
     }
 
@@ -323,21 +371,213 @@ public partial class MainWindow : Window
         panel.Children.Add(CreateQuickFlyoutButton(CreateFlyoutRow("\xE7C1", "高优先级", "!!", (Brush)FindResource("DangerBrush")), () => ApplyPriority("!!")));
         panel.Children.Add(CreateQuickFlyoutButton(CreateFlyoutRow("\xE7C1", "中优先级", "!", (Brush)FindResource("AccentBrush")), () => ApplyPriority("!")));
         panel.Children.Add(CreateQuickFlyoutButton(CreateFlyoutRow("\xE7C1", "低优先级", "!低", (Brush)FindResource("MutedBrush")), () => ApplyPriority("!低")));
-        panel.Children.Add(CreateFlyoutDivider());
-        panel.Children.Add(CreateQuickFlyoutButton(CreateFlyoutRow("\xE711", "清除标记", null), () => ApplyPriority(null)));
         return panel;
     }
 
+    // 分类 picker 是否已展开全部（点了 "…" 之后置 true，关闭弹窗复位）
+    private bool _categoryPickerExpanded;
+    private const int CategoryPickerVisibleCap = 5;
+
     private StackPanel BuildCategoryPanel()
     {
+        _categoryPickerExpanded = false;
         var panel = CreateFlyoutStack();
-        foreach (var category in _vm.Categories)
+        panel.MinWidth = 160;
+        panel.MaxWidth = 180;
+
+        var (searchWrap, searchBox) = BuildPickerSearchBox("搜索标签…");
+        panel.Children.Add(searchWrap);
+
+        var listHost = new WrapPanel { Margin = new Thickness(2, 0, 2, 2) };
+        var scroll = new ScrollViewer
         {
-            var name = category.Name.Trim();
-            if (string.IsNullOrWhiteSpace(name)) continue;
-            panel.Children.Add(CreateQuickFlyoutButton(CreateTagRow(name, category.Color), () => ApplyCategory(name)));
-        }
+            VerticalScrollBarVisibility = ScrollBarVisibility.Hidden,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            MaxHeight = 130,
+            Content = listHost
+        };
+        panel.Children.Add(scroll);
+
+        searchBox.TextChanged += (_, _) => RenderCategoryItems(listHost, searchBox.Text);
+        RenderCategoryItems(listHost, string.Empty);
+
+        Dispatcher.BeginInvoke(new Action(() => searchBox.Focus()), DispatcherPriority.Input);
         return panel;
+    }
+
+    /// <summary>
+    /// 创建一个有 hover/focus 高亮 + 占位符的搜索框，返回 (外层 Border, 内部 TextBox)。
+    /// 默认值/边框/背景必须挂在 Style.Setters，否则 Trigger 改不动（被本地值压住）。
+    /// </summary>
+    private (FrameworkElement Wrap, TextBox Box) BuildPickerSearchBox(string placeholder)
+    {
+        var box = new TextBox
+        {
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            FontSize = 12,
+            Padding = new Thickness(8, 5, 8, 5),
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Foreground = (Brush)FindResource("TextBrush")
+        };
+
+        var hint = new TextBlock
+        {
+            Text = placeholder,
+            FontSize = 12,
+            Foreground = (Brush)FindResource("MutedBrush"),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(10, 0, 0, 0),
+            IsHitTestVisible = false
+        };
+        var hintStyle = new Style(typeof(TextBlock));
+        hintStyle.Setters.Add(new Setter(TextBlock.VisibilityProperty, Visibility.Collapsed));
+        var emptyTrigger = new DataTrigger
+        {
+            Binding = new System.Windows.Data.Binding("Text") { Source = box },
+            Value = ""
+        };
+        emptyTrigger.Setters.Add(new Setter(TextBlock.VisibilityProperty, Visibility.Visible));
+        hintStyle.Triggers.Add(emptyTrigger);
+        hint.Style = hintStyle;
+
+        var inner = new Grid();
+        inner.Children.Add(box);
+        inner.Children.Add(hint);
+
+        var wrap = new Border
+        {
+            Margin = new Thickness(4, 4, 4, 6),
+            Child = inner
+        };
+
+        // 默认/hover/focus 通过 Style.Setters + Triggers，不在元素上硬写本地值
+        var wrapStyle = new Style(typeof(Border));
+        wrapStyle.Setters.Add(new Setter(Border.BackgroundProperty, FindResource("Panel2Brush")));
+        wrapStyle.Setters.Add(new Setter(Border.BorderBrushProperty, FindResource("BorderBrushSoft")));
+        wrapStyle.Setters.Add(new Setter(Border.BorderThicknessProperty, new Thickness(1)));
+        wrapStyle.Setters.Add(new Setter(Border.CornerRadiusProperty, new CornerRadius(7)));
+
+        var hoverTrigger = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
+        hoverTrigger.Setters.Add(new Setter(Border.BorderBrushProperty, FindResource("AccentBrush")));
+        hoverTrigger.Setters.Add(new Setter(Border.BackgroundProperty, FindResource("PanelBrush")));
+        wrapStyle.Triggers.Add(hoverTrigger);
+
+        var focusTrigger = new Trigger { Property = Border.IsKeyboardFocusWithinProperty, Value = true };
+        focusTrigger.Setters.Add(new Setter(Border.BorderBrushProperty, FindResource("AccentBrush")));
+        focusTrigger.Setters.Add(new Setter(Border.BackgroundProperty, FindResource("PanelBrush")));
+        wrapStyle.Triggers.Add(focusTrigger);
+
+        wrap.Style = wrapStyle;
+        return (wrap, box);
+    }
+
+    private void RenderCategoryItems(Panel host, string filter)
+    {
+        host.Children.Clear();
+        var query = filter?.Trim() ?? string.Empty;
+
+        // 过滤匹配项
+        var matched = _vm.Categories
+            .Select(c => c.Name?.Trim())
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Zip(_vm.Categories, (n, c) => (Name: n!, Color: c.Color))
+            .Where(t => query.Length == 0 || t.Name.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0)
+            .ToList();
+
+        if (matched.Count == 0)
+        {
+            host.Children.Add(new TextBlock
+            {
+                Text = "无匹配标签",
+                FontSize = 11.5,
+                Foreground = (Brush)FindResource("MutedBrush"),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(8, 8, 8, 8)
+            });
+            return;
+        }
+
+        // 没在搜索 + 没展开 + 数量超过阈值 → 显示前 Cap 个 + 一个 "…" pill
+        var collapse = query.Length == 0
+                       && !_categoryPickerExpanded
+                       && matched.Count > CategoryPickerVisibleCap;
+        var visibleCount = collapse ? CategoryPickerVisibleCap : matched.Count;
+
+        for (var i = 0; i < visibleCount; i++)
+        {
+            host.Children.Add(CreateTagPill(matched[i].Name, matched[i].Color));
+        }
+        if (collapse)
+        {
+            host.Children.Add(CreateMorePill(host));
+        }
+    }
+
+    /// <summary>"…" pill：点击展开剩余标签</summary>
+    private Border CreateMorePill(Panel host)
+    {
+        var label = new TextBlock
+        {
+            Text = "…",
+            FontSize = 13,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = (Brush)FindResource("MutedBrush"),
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, -4, 0, 0)
+        };
+        var pill = new Border
+        {
+            Style = (Style)FindResource("ClickablePill"),
+            Margin = new Thickness(2, 2, 2, 2),
+            MinWidth = 32,
+            Child = label
+        };
+        pill.MouseLeftButtonUp += (_, _) =>
+        {
+            _categoryPickerExpanded = true;
+            RenderCategoryItems(host, string.Empty);
+        };
+        return pill;
+    }
+
+    /// <summary>
+    /// 单个标签 pill（水平排列）：色点 + #名字，hover 边框变主色，点击应用并关弹窗
+    /// </summary>
+    private Border CreateTagPill(string name, string color)
+    {
+        var dot = new Ellipse
+        {
+            Width = 6,
+            Height = 6,
+            Fill = BrushFromHex(color),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 5, 0)
+        };
+        var label = new TextBlock
+        {
+            Text = name,
+            FontSize = 11.5,
+            Foreground = (Brush)FindResource("TextBrush2"),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var content = new StackPanel { Orientation = Orientation.Horizontal };
+        content.Children.Add(dot);
+        content.Children.Add(label);
+
+        var pill = new Border
+        {
+            Style = (Style)FindResource("ClickablePill"),
+            Margin = new Thickness(2, 2, 2, 2),
+            Child = content
+        };
+        pill.MouseLeftButtonUp += (_, _) =>
+        {
+            ApplyCategory(name);
+            QuickFlyout.IsOpen = false;
+        };
+        return pill;
     }
 
     private void ApplyPriority(string? raw)
@@ -360,7 +600,7 @@ public partial class MainWindow : Window
         else _vm.SetCategoryChip(name);
     }
 
-    private StackPanel CreateFlyoutStack() => new() { MinWidth = 156 };
+    private StackPanel CreateFlyoutStack() => new() { MinWidth = 140 };
 
     private StackPanel CreateQuickCalendarPanel()
     {
@@ -384,28 +624,74 @@ public partial class MainWindow : Window
         return panel;
     }
 
-    private int? _pendingHour;
-    private int? _pendingMinute;
-    private Button? _selectedHourButton;
-    private Button? _selectedMinuteButton;
-
-    private void QuickTimeButton_Click(object sender, RoutedEventArgs e)
+    // 合并面板：日历 + 分隔线 + 时间选择器，竖向堆叠
+    private FrameworkElement CreateQuickDateTimePanel()
     {
-        if (sender is not Button button) return;
+        var panel = new StackPanel { MinWidth = 264 };
+
+        _calendarHost = new ContentControl { Content = CreateQuickCalendarPanel() };
+        panel.Children.Add(_calendarHost);
+
+        panel.Children.Add(new Border
+        {
+            Height = 1,
+            Background = (Brush)FindResource("BorderBrushSoft"),
+            Margin = new Thickness(8, 4, 8, 2)
+        });
+
+        panel.Children.Add(CreateTimePickerPanel());
+        return panel;
+    }
+
+    // 在打开合并面板前调用：根据当前编辑/Quick 状态把待选时间预置到 _pendingHour/_pendingMinute
+    private void InitTimePickerSelection()
+    {
+        var existing = _editingTask?.DueAt?.TimeOfDay ?? _vm.CurrentChipDue?.TimeOfDay;
         _pendingHour = null;
         _pendingMinute = null;
         _selectedHourButton = null;
         _selectedMinuteButton = null;
-        OpenQuickAddFlyout(button, CreateTimePickerPanel());
-        e.Handled = true;
+        if (existing is { } t)
+        {
+            // 默认 23:59 是"无具体时间"的占位，跳过预选
+            if (!(t.Hours == 23 && t.Minutes == 59))
+            {
+                _pendingHour = t.Hours;
+                if (t.Minutes is 0 or 15 or 30 or 45) _pendingMinute = t.Minutes;
+            }
+        }
     }
+
+    // 把 _calendarHost.Content 重新渲染为当前 _calendarMode 对应的视图。
+    // 替换早期版本里的 `QuickFlyoutContent.Content = CreateQuickCalendarPanel();`，
+    // 这样切年/月/日时不会重渲染时间选择器。
+    //
+    // 重要：所有调用点都在 Button.Click 内（日期按钮、年/月按钮、上下月切换…）。
+    // 如果同步替换 Content，当前点击的 Button 自身会随旧可视树一起被移除，
+    // 而 WPF 还在路由 Click 事件，引用已无效的元素 → AccessViolation 闪退。
+    // 用 BeginInvoke 把替换推到事件队列尾，等 Click 处理完再执行。
+    private void RefreshCalendarHost()
+    {
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (_calendarHost is not null)
+                _calendarHost.Content = CreateQuickCalendarPanel();
+            else
+                QuickFlyoutContent.Content = CreateQuickCalendarPanel();
+        }), DispatcherPriority.Background);
+    }
+
+    private int? _pendingHour;
+    private int? _pendingMinute;
+    private Button? _selectedHourButton;
+    private Button? _selectedMinuteButton;
 
     private StackPanel CreateTimePickerPanel()
     {
         var panel = new StackPanel { MinWidth = 180 };
         panel.Children.Add(new TextBlock
         {
-            Text = "选择时间",
+            Text = "时间",
             FontSize = 11.5,
             Foreground = (Brush)FindResource("MutedBrush"),
             Margin = new Thickness(10, 6, 10, 8),
@@ -458,7 +744,7 @@ public partial class MainWindow : Window
         var hourStack = new StackPanel { HorizontalAlignment = HorizontalAlignment.Stretch };
         for (var h = 0; h < 24; h++)
         {
-            hourStack.Children.Add(CreateTimeListCell(h.ToString("00"), value: h, isMinute: false));
+            hourStack.Children.Add(CreateTimeListCell(h.ToString("00"), value: h, isMinute: false, initiallySelected: _pendingHour == h));
         }
         hourScroll.Content = hourStack;
         Grid.SetColumn(hourScroll, 0);
@@ -482,7 +768,7 @@ public partial class MainWindow : Window
         var minuteStack = new StackPanel { HorizontalAlignment = HorizontalAlignment.Stretch };
         foreach (var m in new[] { 0, 15, 30, 45 })
         {
-            minuteStack.Children.Add(CreateTimeListCell(m.ToString("00"), value: m, isMinute: true));
+            minuteStack.Children.Add(CreateTimeListCell(m.ToString("00"), value: m, isMinute: true, initiallySelected: _pendingMinute == m));
         }
         minuteScroll.Content = minuteStack;
         Grid.SetColumn(minuteScroll, 2);
@@ -492,7 +778,7 @@ public partial class MainWindow : Window
         return panel;
     }
 
-    private Button CreateTimeListCell(string label, int value, bool isMinute)
+    private Button CreateTimeListCell(string label, int value, bool isMinute, bool initiallySelected = false)
     {
         var btn = new Button
         {
@@ -510,6 +796,16 @@ public partial class MainWindow : Window
         {
             VisualTree = MakeTitleButtonTemplate()
         };
+
+        // 打开面板时按 _pendingHour/_pendingMinute 预选高亮
+        if (initiallySelected)
+        {
+            btn.Background = (Brush)FindResource("AccentSoftBrush");
+            btn.Foreground = (Brush)FindResource("AccentInkBrush");
+            btn.FontWeight = FontWeights.SemiBold;
+            if (isMinute) _selectedMinuteButton = btn;
+            else _selectedHourButton = btn;
+        }
 
         // Hover only when not selected (selected styling wins)
         btn.MouseEnter += (_, _) =>
@@ -536,6 +832,8 @@ public partial class MainWindow : Window
                 _pendingHour = value;
             }
 
+            // 两个轮都选好后即应用，但**不再自动关 popup**
+            // —— 用户可能想接着调日期，关闭交给点击外部。
             if (_pendingHour is { } h && _pendingMinute is { } m)
             {
                 if (_editingTask is { } t)
@@ -547,7 +845,6 @@ public partial class MainWindow : Window
                 {
                     SetTimeChip(h, m);
                 }
-                QuickFlyout.IsOpen = false;
             }
         };
         return btn;
@@ -593,13 +890,13 @@ public partial class MainWindow : Window
         {
             _yearGridStart = (_quickCalendarMonth.Year / 12) * 12;
             _calendarMode = CalendarPickerMode.Year;
-            QuickFlyoutContent.Content = CreateQuickCalendarPanel();
+            RefreshCalendarHost();
         };
         var monthBtn = CreateCalendarTitleButton($"{_quickCalendarMonth.Month}月");
         monthBtn.Click += (_, _) =>
         {
             _calendarMode = CalendarPickerMode.Month;
-            QuickFlyoutContent.Content = CreateQuickCalendarPanel();
+            RefreshCalendarHost();
         };
         titleStack.Children.Add(yearBtn);
         titleStack.Children.Add(monthBtn);
@@ -629,7 +926,7 @@ public partial class MainWindow : Window
         {
             _yearGridStart = (_quickCalendarMonth.Year / 12) * 12;
             _calendarMode = CalendarPickerMode.Year;
-            QuickFlyoutContent.Content = CreateQuickCalendarPanel();
+            RefreshCalendarHost();
         };
         var next = CreateCalendarNavButton("\xE76C");
         next.Click += (_, _) => ShiftQuickCalendarYear(1);
@@ -653,7 +950,7 @@ public partial class MainWindow : Window
         prev.Click += (_, _) =>
         {
             _yearGridStart -= 12;
-            QuickFlyoutContent.Content = CreateQuickCalendarPanel();
+            RefreshCalendarHost();
         };
         var title = new TextBlock
         {
@@ -668,7 +965,7 @@ public partial class MainWindow : Window
         next.Click += (_, _) =>
         {
             _yearGridStart += 12;
-            QuickFlyoutContent.Content = CreateQuickCalendarPanel();
+            RefreshCalendarHost();
         };
 
         header.Children.Add(prev);
@@ -706,7 +1003,7 @@ public partial class MainWindow : Window
             {
                 _quickCalendarMonth = new DateTime(year, _quickCalendarMonth.Month, 1);
                 _calendarMode = CalendarPickerMode.Month;
-                QuickFlyoutContent.Content = CreateQuickCalendarPanel();
+                RefreshCalendarHost();
             };
             grid.Children.Add(btn);
         }
@@ -776,7 +1073,7 @@ public partial class MainWindow : Window
             {
                 _quickCalendarMonth = new DateTime(_quickCalendarMonth.Year, month, 1);
                 _calendarMode = CalendarPickerMode.Day;
-                QuickFlyoutContent.Content = CreateQuickCalendarPanel();
+                RefreshCalendarHost();
             };
             grid.Children.Add(btn);
         }
@@ -787,7 +1084,7 @@ public partial class MainWindow : Window
     {
         var target = _quickCalendarMonth.AddYears(years);
         _quickCalendarMonth = new DateTime(target.Year, _quickCalendarMonth.Month, 1);
-        QuickFlyoutContent.Content = CreateQuickCalendarPanel();
+        RefreshCalendarHost();
     }
 
     private Button CreateCalendarNavButton(string glyph)
@@ -841,6 +1138,10 @@ public partial class MainWindow : Window
     {
         var isCurrentMonth = date.Month == _quickCalendarMonth.Month && date.Year == _quickCalendarMonth.Year;
         var isToday = date.Date == DateTime.Today;
+        // 已经被选中的日期：编辑模式看 _editingTask.DueAt；快速添加模式看 _vm.CurrentChipDue
+        var selectedDate = (_editingTask?.DueAt ?? _vm.CurrentChipDue)?.Date;
+        var isSelected = selectedDate == date.Date;
+
         var button = new Button
         {
             Content = date.Day.ToString(),
@@ -851,7 +1152,14 @@ public partial class MainWindow : Window
                 : (Brush)FindResource("MutedBrush")
         };
 
-        if (isToday)
+        // 选中态优先级最高（深底白字），今天次之（浅底主色）
+        if (isSelected)
+        {
+            button.Background = (Brush)FindResource("AccentBrush");
+            button.Foreground = Brushes.White;
+            button.FontWeight = FontWeights.SemiBold;
+        }
+        else if (isToday)
         {
             button.Background = (Brush)FindResource("AccentSoftBrush");
             button.BorderBrush = (Brush)FindResource("AccentBrush");
@@ -871,7 +1179,9 @@ public partial class MainWindow : Window
             {
                 _vm.SetDueChip(date, hadDate: true);
             }
-            QuickFlyout.IsOpen = false;
+            // 不自动关 popup：用户可能还要选时间。
+            // RefreshCalendarHost 内部已用 BeginInvoke 延迟，避免 Click 期间销毁自身按钮的崩溃。
+            RefreshCalendarHost();
         };
         return button;
     }
@@ -880,7 +1190,7 @@ public partial class MainWindow : Window
     {
         var target = _quickCalendarMonth.AddMonths(months);
         _quickCalendarMonth = new DateTime(target.Year, target.Month, 1);
-        QuickFlyoutContent.Content = CreateQuickCalendarPanel();
+        RefreshCalendarHost();
     }
 
     private Button CreateQuickFlyoutButton(object content, Action action)
@@ -958,7 +1268,7 @@ public partial class MainWindow : Window
         };
         var label = new TextBlock
         {
-            Text = $"#{name}",
+            Text = name,
             FontSize = 12,
             Foreground = (Brush)FindResource("TextBrush2"),
             VerticalAlignment = VerticalAlignment.Center
@@ -1006,6 +1316,7 @@ public partial class MainWindow : Window
     {
         NewTaskRow.Tag = null;
         _editingTask = null;
+        _calendarHost = null;
         MoveQuickCaretToEnd();
     }
 
@@ -1057,31 +1368,25 @@ public partial class MainWindow : Window
 
     private void BtnSearch_Click(object sender, RoutedEventArgs e)
     {
-        if (SearchPanel.Visibility == Visibility.Visible)
-        {
-            SearchPanel.Visibility = Visibility.Collapsed;
-            _vm.SearchText = string.Empty;
-        }
-        else
-        {
-            SearchPanel.Visibility = Visibility.Visible;
-            SearchBox.Focus();
-        }
+        // 切换搜索/添加：共用 NewTaskBox。OnIsSearchModeChanged 会清空 QuickInput/SearchText
+        _vm.IsSearchMode = !_vm.IsSearchMode;
+        Dispatcher.BeginInvoke(new Action(() => { NewTaskBox.Focus(); NewTaskBox.SelectAll(); }),
+            System.Windows.Threading.DispatcherPriority.Input);
     }
 
     private void ClearSearch_Click(object sender, RoutedEventArgs e)
     {
-        _vm.SearchText = string.Empty;
-        SearchBox.Focus();
-    }
-
-    private void SearchBox_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Escape)
+        // 有内容 → 仅清空；已为空再点 → 退出搜索模式
+        if (!string.IsNullOrEmpty(_vm.QuickInput))
         {
-            _vm.SearchText = string.Empty;
-            SearchPanel.Visibility = Visibility.Collapsed;
-            e.Handled = true;
+            _vm.QuickInput = string.Empty; // OnQuickInputChanged 会同步 SearchText
+            NewTaskBox.Focus();
+        }
+        else
+        {
+            _vm.IsSearchMode = false;
+            Dispatcher.BeginInvoke(new Action(() => NewTaskBox.Focus()),
+                System.Windows.Threading.DispatcherPriority.Input);
         }
     }
 
@@ -1166,7 +1471,8 @@ public partial class MainWindow : Window
             : new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
         _yearGridStart = (_quickCalendarMonth.Year / 12) * 12;
         _calendarMode = CalendarPickerMode.Day;
-        OpenQuickFlyout(el, CreateQuickCalendarPanel());
+        InitTimePickerSelection();
+        OpenQuickFlyout(el, CreateQuickDateTimePanel());
         e.Handled = true;
     }
 
@@ -1186,12 +1492,92 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    // —— Chip × 删除 —— hover 时按钮可见，点击直接清空对应字段。
+    // Button 内部会把 MouseLeftButtonUp 标记为 Handled，所以不会冒泡触发外层 chip 的 picker。
+    private void ChipDateRemove_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement el || el.DataContext is not TaskItemViewModel vm) return;
+        _vm.UpdateTaskDue(vm, null);
+        e.Handled = true;
+    }
+
+    private void ChipPriorityRemove_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement el || el.DataContext is not TaskItemViewModel vm) return;
+        _vm.UpdateTaskPriority(vm, "");
+        e.Handled = true;
+    }
+
+    private void ChipCategoryRemove_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement el || el.DataContext is not TaskItemViewModel vm) return;
+        _vm.UpdateTaskCategory(vm, null);
+        e.Handled = true;
+    }
+
     private void AddSubtaskButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button btn && btn.DataContext is TaskItemViewModel vm)
         {
             vm.DraftSubtaskTitle = string.Empty;
             vm.IsAddingSubtask = true;
+        }
+    }
+
+    // —— 子任务标题点击进入编辑态 ——
+    private void SubtaskTitle_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement el && el.DataContext is TaskItemViewModel vm)
+        {
+            vm.EditingTitle = vm.Title;
+            vm.IsInlineEditing = true;
+            e.Handled = true;
+        }
+    }
+
+    private void SubtaskEdit_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox tb || tb.DataContext is not TaskItemViewModel vm) return;
+        if (e.Key == Key.Enter)
+        {
+            CommitSubtaskEdit(vm, tb.Text);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            // 撤销：直接退出编辑态，不写回
+            vm.IsInlineEditing = false;
+            e.Handled = true;
+        }
+    }
+
+    private void SubtaskEdit_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is not TextBox tb || tb.DataContext is not TaskItemViewModel vm) return;
+        if (!vm.IsInlineEditing) return;
+        CommitSubtaskEdit(vm, tb.Text);
+    }
+
+    private void CommitSubtaskEdit(TaskItemViewModel vm, string newTitle)
+    {
+        var trimmed = newTitle?.Trim() ?? string.Empty;
+        if (!string.IsNullOrEmpty(trimmed) && trimmed != vm.Title)
+        {
+            _vm.RenameTask(vm, trimmed);
+        }
+        vm.IsInlineEditing = false;
+    }
+
+    private void SubtaskEdit_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if ((bool)e.NewValue && sender is TextBox tb)
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                tb.Focus();
+                tb.SelectAll();
+                Keyboard.Focus(tb);
+            }), DispatcherPriority.Input);
         }
     }
 
@@ -1249,13 +1635,24 @@ public partial class MainWindow : Window
         }
     }
 
-    private void BtnPin_Click(object sender, RoutedEventArgs e)
+    private void BtnMinimize_Click(object sender, RoutedEventArgs e)
     {
-        Topmost = !Topmost;
-        if (sender is Button b) b.Opacity = Topmost ? 1.0 : 0.4;
+        // 这个窗口默认 ShowInTaskbar=False，最小化后没有任务栏入口就找不回来了。
+        // 临时把 ShowInTaskbar 打开，等用户从任务栏点回来时再恢复隐藏。
+        ShowInTaskbar = true;
+        WindowState = WindowState.Minimized;
     }
 
     private void BtnClose_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void MainWindow_StateChanged(object? sender, EventArgs e)
+    {
+        // 从最小化恢复后把 ShowInTaskbar 关回去，回到纯悬浮窗形态。
+        if (WindowState == WindowState.Normal && ShowInTaskbar)
+        {
+            ShowInTaskbar = false;
+        }
+    }
 
     private void MainWindow_KeyDown(object sender, KeyEventArgs e)
     {
@@ -1314,6 +1711,97 @@ public partial class MainWindow : Window
         }
 
         return false;
+    }
+
+    // ===== 顶栏自适应：窗口越窄，逐级折叠次要元素 =====
+    // 阈值是按"刚好放得下下一档元素"反推的：
+    //   ≥ 420px 全显
+    //   < 420px 隐藏 tab 计数（"待办 6" → "待办"）
+    //   < 360px 再隐藏搜索按钮（设置 / Min / Close 永远保留）
+    private void ApplyResponsiveTopBar()
+    {
+        if (TodayCountText == null) return; // 尚未 InitializeComponent
+
+        var w = ActualWidth;
+        var showCounts = w >= 420;
+        var showSearch = w >= 360;
+
+        var countVis = showCounts ? Visibility.Visible : Visibility.Collapsed;
+        TodayCountText.Visibility = countVis;
+        UpcomingCountText.Visibility = countVis;
+        InboxCountText.Visibility = countVis;
+
+        if (SearchButton != null)
+            SearchButton.Visibility = showSearch ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // ===== 底部分类条溢出处理 =====
+    private void HookCategoryOverflowPanel()
+    {
+        if (_categoryOverflowPanel != null) return;
+        if (CategoryFilterStrip == null) return;
+        // 等 ItemsControl 把 ItemsHost 物化出来再钩。LayoutUpdated 是稳的兜底。
+        EventHandler? handler = null;
+        handler = (s, e) =>
+        {
+            var panel = FindDescendant<OverflowHidePanel>(CategoryFilterStrip);
+            if (panel != null)
+            {
+                CategoryFilterStrip.LayoutUpdated -= handler!;
+                _categoryOverflowPanel = panel;
+                panel.OverflowChanged += CategoryOverflowPanel_OverflowChanged;
+            }
+        };
+        CategoryFilterStrip.LayoutUpdated += handler;
+    }
+
+    private void CategoryOverflowPanel_OverflowChanged(object? sender, OverflowChangedEventArgs e)
+    {
+        _hiddenCategoryFilters = e.HiddenItems
+            .OfType<CategoryFilterViewModel>()
+            .ToList();
+
+        if (_hiddenCategoryFilters.Count > 0)
+        {
+            CategoryMoreButton.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            CategoryMoreButton.Visibility = Visibility.Collapsed;
+            if (CategoryOverflowPopup != null) CategoryOverflowPopup.IsOpen = false;
+        }
+    }
+
+    private void CategoryMoreButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (CategoryOverflowPopup == null) return;
+        if (_hiddenCategoryFilters.Count == 0) return;
+        CategoryOverflowList.ItemsSource = null;
+        CategoryOverflowList.ItemsSource = _hiddenCategoryFilters;
+        CategoryOverflowPopup.IsOpen = true;
+    }
+
+    private void CategoryOverflowItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is CategoryFilterViewModel vm)
+        {
+            _vm.SelectCategoryFilterCommand.Execute(vm);
+        }
+        if (CategoryOverflowPopup != null) CategoryOverflowPopup.IsOpen = false;
+    }
+
+    private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
+    {
+        if (root == null) return null;
+        int n = VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < n; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T t) return t;
+            var deeper = FindDescendant<T>(child);
+            if (deeper != null) return deeper;
+        }
+        return null;
     }
 }
 

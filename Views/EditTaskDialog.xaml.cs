@@ -1,7 +1,10 @@
+using System;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using TodoFloat.Data;
 using TodoFloat.Models;
 using TodoFloat.ViewModels;
@@ -13,6 +16,11 @@ public partial class EditTaskDialog : Window
     private readonly TaskItemViewModel _vm;
     private readonly TaskRepository _tasks;
 
+    [DllImport("dwmapi.dll", PreserveSig = true)]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+    private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    private const int DWMWCP_ROUND = 2;
+
     public EditTaskDialog(
         TaskItemViewModel vm,
         IList<Category> categories,
@@ -20,6 +28,13 @@ public partial class EditTaskDialog : Window
         CategoryRepository _)
     {
         InitializeComponent();
+        SourceInitialized += (_, _) =>
+        {
+            var hwnd = new WindowInteropHelper(this).Handle;
+            if (hwnd == IntPtr.Zero) return;
+            int pref = DWMWCP_ROUND;
+            DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref pref, sizeof(int));
+        };
         _vm = vm;
         _tasks = tasks;
 

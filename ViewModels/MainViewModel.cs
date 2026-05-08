@@ -54,6 +54,7 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty] private string _quickInput = string.Empty;
     [ObservableProperty] private string _searchText = string.Empty;
+    [ObservableProperty] private bool _isSearchMode;
     [ObservableProperty] private long? _filterCategoryId;
     [ObservableProperty] private bool _showCompleted;
     [ObservableProperty] private int _activeCount;
@@ -105,7 +106,7 @@ public partial class MainViewModel : ObservableObject
     {
         TodoView.Today => "暂无待办",
         TodoView.Upcoming => "后续没有安排",
-        TodoView.Inbox => "收件箱已清空",
+        TodoView.Inbox => "任务列表为空",
         _ => "没有任务"
     };
 
@@ -121,6 +122,8 @@ public partial class MainViewModel : ObservableObject
     private string? _chipCategoryName;
 
     public string? QuickChipDueLabel => _chipDue is { } d ? FormatDueLabel(d) : null;
+    /// <summary>QuickAdd 的当前 due（含日期和时间），合并日期/时间选择器需要用。</summary>
+    public DateTime? CurrentChipDue => _chipDue;
     public string? QuickChipPriorityKey => _chipPriorityRaw switch
     {
         "!!" or "!高" => "high",
@@ -251,6 +254,11 @@ public partial class MainViewModel : ObservableObject
 
     public void ReloadTasks()
     {
+        // 重建任务列表前快照已展开的任务 ID，重建后还原。
+        // 之前每次 reload 都会让"第一组第一项"自动展开，导致用户改任意 chip 时
+        // 当前展开的任务被收起，下沉到列表末尾，体验很怪。
+        var prevExpandedIds = Tasks.Where(t => t.IsExpanded).Select(t => t.Model.Id).ToHashSet();
+
         var allRoots = _tasks.GetAll(includeCompleted: true).Where(t => t.ParentId is null).ToList();
         RecountGlobal(allRoots);
         RefreshCategoryFilters(allRoots);
@@ -271,7 +279,7 @@ public partial class MainViewModel : ObservableObject
         Tasks.Clear();
         TaskGroups.Clear();
 
-        foreach (var group in BuildGroups(filtered, catLookup))
+        foreach (var group in BuildGroups(filtered, catLookup, prevExpandedIds))
         {
             TaskGroups.Add(group);
             foreach (var task in group.Tasks)
@@ -304,20 +312,22 @@ public partial class MainViewModel : ObservableObject
 
     private IEnumerable<TaskGroupViewModel> BuildGroups(
         IReadOnlyList<TodoTask> filtered,
-        Dictionary<long, Category> catLookup)
+        Dictionary<long, Category> catLookup,
+        HashSet<long>? prevExpandedIds = null)
     {
         return CurrentView switch
         {
-            TodoView.Today => BuildTodayGroups(filtered, catLookup),
-            TodoView.Upcoming => BuildUpcomingGroups(filtered, catLookup),
-            TodoView.Inbox => BuildInboxGroups(filtered, catLookup),
+            TodoView.Today => BuildTodayGroups(filtered, catLookup, prevExpandedIds),
+            TodoView.Upcoming => BuildUpcomingGroups(filtered, catLookup, prevExpandedIds),
+            TodoView.Inbox => BuildInboxGroups(filtered, catLookup, prevExpandedIds),
             _ => []
         };
     }
 
     private IEnumerable<TaskGroupViewModel> BuildTodayGroups(
         IReadOnlyList<TodoTask> filtered,
-        Dictionary<long, Category> catLookup)
+        Dictionary<long, Category> catLookup,
+        HashSet<long>? prevExpandedIds)
     {
         var group = BuildGroup(
             "待办",
@@ -325,6 +335,7 @@ public partial class MainViewModel : ObservableObject
             true,
             filtered,
             catLookup,
+            prevExpandedIds,
             showHeader: false);
 
         if (group is not null) yield return group;
@@ -332,7 +343,8 @@ public partial class MainViewModel : ObservableObject
 
     private IEnumerable<TaskGroupViewModel> BuildUpcomingGroups(
         IReadOnlyList<TodoTask> filtered,
-        Dictionary<long, Category> catLookup)
+        Dictionary<long, Category> catLookup,
+        HashSet<long>? prevExpandedIds)
     {
         var today = DateTime.Today;
         var tomorrow = filtered.Where(t => t.DueAt?.ToLocalTime().Date == today.AddDays(1)).ToList();
@@ -343,9 +355,9 @@ public partial class MainViewModel : ObservableObject
         }).ToList();
         var later = filtered.Where(t => t.DueAt?.ToLocalTime().Date > today.AddDays(7)).ToList();
 
-        var tomorrowGroup = BuildGroup("明天", DateTime.Today.AddDays(1).ToString("M月d日 ddd"), false, tomorrow, catLookup);
-        var weekGroup = BuildGroup("本周", "未来 7 天", false, week, catLookup);
-        var laterGroup = BuildGroup("稍后", "已安排", false, later, catLookup);
+        var tomorrowGroup = BuildGroup("明天", DateTime.Today.AddDays(1).ToString("M月d日 ddd"), false, tomorrow, catLookup, prevExpandedIds);
+        var weekGroup = BuildGroup("本周", "未来 7 天", false, week, catLookup, prevExpandedIds);
+        var laterGroup = BuildGroup("稍后", "已安排", false, later, catLookup, prevExpandedIds);
 
         if (tomorrowGroup is not null) yield return tomorrowGroup;
         if (weekGroup is not null) yield return weekGroup;
@@ -354,7 +366,8 @@ public partial class MainViewModel : ObservableObject
 
     private IEnumerable<TaskGroupViewModel> BuildInboxGroups(
         IReadOnlyList<TodoTask> filtered,
-        Dictionary<long, Category> catLookup)
+        Dictionary<long, Category> catLookup,
+        HashSet<long>? prevExpandedIds)
     {
         var group = BuildGroup(
             ShowCompleted ? "全部任务" : "全部待办",
@@ -362,6 +375,7 @@ public partial class MainViewModel : ObservableObject
             false,
             filtered,
             catLookup,
+            prevExpandedIds,
             showHeader: false);
 
         if (group is not null) yield return group;
@@ -373,15 +387,20 @@ public partial class MainViewModel : ObservableObject
         bool accent,
         IReadOnlyList<TodoTask> roots,
         Dictionary<long, Category> catLookup,
+        HashSet<long>? prevExpandedIds = null,
         bool showHeader = true)
     {
         if (roots.Count == 0) return null;
 
+        var hasPrev = prevExpandedIds is { Count: > 0 };
         var group = new TaskGroupViewModel(title, subtitle, accent, showHeader);
         for (var i = 0; i < roots.Count; i++)
         {
             var vm = BuildVm(roots[i], catLookup);
-            vm.IsExpanded = TaskGroups.Count == 0 && group.Tasks.Count == 0;
+            // 有快照时按快照还原；首次加载（无快照）才让首组首项自动展开。
+            vm.IsExpanded = hasPrev
+                ? prevExpandedIds!.Contains(roots[i].Id)
+                : (TaskGroups.Count == 0 && group.Tasks.Count == 0);
 
             foreach (var s in _tasks.GetSubtasks(roots[i].Id).Where(s => ShowCompleted || !s.Completed))
             {
@@ -448,15 +467,19 @@ public partial class MainViewModel : ObservableObject
 
     private void RefreshCategoryFilters(IReadOnlyList<TodoTask> roots)
     {
+        // 不再加"全部"项——它和顶部的"全部"视图 tab 撞概念。
+        // 取消筛选改为：再次点击当前已选的分类即清空。
         CategoryFilters.Clear();
-
         var open = roots.Where(t => !t.Completed).ToList();
-        CategoryFilters.Add(new CategoryFilterViewModel(null, "全部", "#E8915E", open.Count, FilterCategoryId is null));
-
-        foreach (var c in Categories)
+        // 按未完成任务数降序：常用分类自然落在前面，单行也能显示主要内容
+        var ranked = Categories
+            .Select(c => new { Cat = c, Count = open.Count(t => t.CategoryId == c.Id) })
+            .OrderByDescending(x => x.Count)
+            .ThenBy(x => x.Cat.Id)
+            .ToList();
+        foreach (var x in ranked)
         {
-            var count = open.Count(t => t.CategoryId == c.Id);
-            CategoryFilters.Add(new CategoryFilterViewModel(c.Id, LocalizeCategoryName(c.Name), c.Color, count, FilterCategoryId == c.Id));
+            CategoryFilters.Add(new CategoryFilterViewModel(x.Cat.Id, LocalizeCategoryName(x.Cat.Name), x.Cat.Color, x.Count, FilterCategoryId == x.Cat.Id));
         }
     }
 
@@ -600,7 +623,31 @@ public partial class MainViewModel : ObservableObject
         vm.Model.Completed = vm.Completed;
         vm.Model.CompletedAt = vm.Completed ? DateTime.UtcNow : null;
         _tasks.SetCompleted(vm.Model.Id, vm.Completed);
-        ReloadTasks();
+
+        // 不重建整个列表：重建会让 CheckBox 实例销毁并新建，
+        // 容易出现优先级 ring 颜色没及时复位等渲染细节 bug，而且任务会跳到底部。
+        // 完成态切换是局部变化，让现有 CheckBox 自己根据 IsChecked 触发器更新就够了。
+        // 只更新计数器；如果 ShowCompleted=False 且刚刚完成，把这个项从可见列表中拿掉。
+        if (vm.Completed && !ShowCompleted)
+        {
+            RemoveFromVisible(vm);
+        }
+        RecountFromTasks();
+    }
+
+    private void RemoveFromVisible(TaskItemViewModel vm)
+    {
+        Tasks.Remove(vm);
+        foreach (var g in TaskGroups) g.Tasks.Remove(vm);
+    }
+
+    /// <summary>只重算计数器，不重建任务列表。</summary>
+    private void RecountFromTasks()
+    {
+        var allRoots = _tasks.GetAll(includeCompleted: true).Where(t => t.ParentId is null).ToList();
+        RecountGlobal(allRoots);
+        RefreshCategoryFilters(allRoots);
+        ActiveCount = Tasks.Count(t => !t.Completed) + Tasks.Sum(t => t.Subtasks.Count(s => !s.Completed));
     }
 
     [RelayCommand]
@@ -658,7 +705,21 @@ public partial class MainViewModel : ObservableObject
         task.DueAt = due;
         task.Model.DueAt = due?.ToUniversalTime();
         _tasks.Update(task.Model);
-        ReloadTasks();
+        // 不重建：DueAt 是排序的主键，重建会让任务"下沉"。
+        // 当前视图（待办）下任务无日期仍可见，所以原地更新即可。
+        // 仅在规划视图改日期可能跨组，那是已知的小不一致，等用户切 tab 自然刷新。
+        RecountFromTasks();
+    }
+
+    /// <summary>原地改任务标题（subtask inline edit 用），不重建列表</summary>
+    public void RenameTask(TaskItemViewModel? task, string newTitle)
+    {
+        if (task is null) return;
+        var trimmed = newTitle?.Trim();
+        if (string.IsNullOrEmpty(trimmed)) return;
+        task.Title = trimmed;
+        task.Model.Title = trimmed;
+        _tasks.Update(task.Model);
     }
 
     /// <summary>Apply a priority (raw token like "!!"/"!"/"!低") to an existing task and persist.</summary>
@@ -675,6 +736,7 @@ public partial class MainViewModel : ObservableObject
         task.Priority = priority;
         task.Model.Priority = priority;
         _tasks.Update(task.Model);
+        // 优先级也不参与排序/分组，本来就没调 ReloadTasks，这里也不需要。
     }
 
     /// <summary>Apply a category (by name) to an existing task and persist.</summary>
@@ -690,7 +752,8 @@ public partial class MainViewModel : ObservableObject
         task.CategoryName = cat is null ? null : LocalizeCategoryName(cat.Name);
         task.CategoryColor = cat?.Color;
         _tasks.Update(task.Model);
-        ReloadTasks();
+        // 分类不参与排序/分组，不需要重建列表。
+        RecountFromTasks();
     }
 
     [RelayCommand]
@@ -722,7 +785,11 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void SelectCategoryFilter(CategoryFilterViewModel? filter)
     {
-        FilterCategoryId = filter?.Id;
+        // 切换语义：点同一个分类清空筛选，点别的就切到那个分类
+        if (filter?.Id is { } id && FilterCategoryId == id)
+            FilterCategoryId = null;
+        else
+            FilterCategoryId = filter?.Id;
     }
 
     [RelayCommand]
@@ -911,8 +978,22 @@ public partial class MainViewModel : ObservableObject
     partial void OnSearchTextChanged(string value) => ReloadTasks();
     partial void OnFilterCategoryIdChanged(long? value) => ReloadTasks();
 
+    partial void OnIsSearchModeChanged(bool value)
+    {
+        // 切换模式：清空共享输入框 + 清空对应的 sink，避免上一次的草稿/搜索词残留
+        QuickInput = string.Empty;
+        SearchText = string.Empty;
+    }
+
     partial void OnQuickInputChanged(string value)
     {
+        // 搜索模式下，输入框的内容直接驱动搜索（共享同一字段）
+        if (IsSearchMode)
+        {
+            SearchText = value;
+            return;
+        }
+
         if (_suppressExtract) return;
         if (string.IsNullOrEmpty(value)) return;
 

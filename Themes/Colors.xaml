@@ -35,34 +35,40 @@
        原 oklch 已转换为最接近的 sRGB hex。
        暖橘 accent #E8915E ≈ oklch(0.68 0.16 35)
   -->
+  <!-- 主色 / Accent —— oklch(0.68 0.16 35) 暖橘 -->
   <Color x:Key="C.Accent">#E8915E</Color>
   <Color x:Key="C.AccentSoft">#FBE7D6</Color>
   <Color x:Key="C.AccentInk">#A45A2C</Color>
 
-  <Color x:Key="C.Bg">#F5EFE0</Color>
-  <Color x:Key="C.Glass">#FFF5EFE0</Color>      <!-- opaque shell -->
-  <Color x:Key="C.Glass2">#FFEBE3D2</Color>     <!-- opaque footer -->
+  <!-- 中性 / Neutrals (light) —— hue 70° 微暖中性，与橘色融合 -->
+  <!-- 背景再深一档 (#F7F5F2 → #ECE6DA)，与白色任务卡形成清晰的"卡片浮在桌面上"层次 -->
+  <Color x:Key="C.Bg">#ECE6DA</Color>           <!-- 暖米色（比白色卡明显深） -->
+  <Color x:Key="C.Glass">#FFECE6DA</Color>      <!-- opaque shell -->
+  <Color x:Key="C.Glass2">#FFE5DECF</Color>     <!-- opaque footer / Panel2 -->
   <Color x:Key="C.Panel">#FFFFFFFF</Color>
-  <Color x:Key="C.Panel2">#FFEBE3D2</Color>
+  <Color x:Key="C.Panel2">#FFE5DECF</Color>
 
-  <Color x:Key="C.Line">#FFE3E1DC</Color>
-  <Color x:Key="C.Line2">#FFF0EEEB</Color>
+  <Color x:Key="C.Line">#FFCEC8BC</Color>       <!-- 主分割线（跟新底色匹配） -->
+  <Color x:Key="C.Line2">#FFD8D2C5</Color>      <!-- 次分割线 -->
 
-  <!-- 行 hover 中性暖灰，与展开态 AccentSoft 形成区分 -->
-  <Color x:Key="C.RowHover">#FFEBE6DE</Color>
+  <!-- 行 hover 中性暖灰，介于 Bg 与 Panel2 之间 -->
+  <Color x:Key="C.RowHover">#FFEDEAE5</Color>
 
   <Color x:Key="C.Ink">#2B2925</Color>
   <Color x:Key="C.Ink2">#5C5852</Color>
   <Color x:Key="C.Ink3">#857F77</Color>
   <Color x:Key="C.Ink4">#B5AEA4</Color>
 
+  <!-- 优先级：High 砖红、Med 复用 Accent、Low 中灰 -->
   <Color x:Key="C.PriHigh">#D85A45</Color>
   <Color x:Key="C.PriMed">#E8915E</Color>
   <Color x:Key="C.PriLow">#A8A8B2</Color>
 
+  <!-- 列表彩点 -->
   <Color x:Key="C.ListWork">#E89060</Color>
   <Color x:Key="C.ListPersonal">#7B98E8</Color>
   <Color x:Key="C.ListDesign">#5FB58A</Color>
+  <Color x:Key="C.ListReading">#D6B255</Color>
   <Color x:Key="C.ListHome">#C57BB8</Color>
 
   <!-- ========== Brushes ========== -->
