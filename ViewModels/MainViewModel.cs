@@ -294,7 +294,7 @@ public partial class MainViewModel : ObservableObject
             : SearchRoots(SearchText, allRoots, out searchMatchIds);
 
         var filtered = roots
-            .Where(IsVisibleInCurrentView)
+            .Where(t => IsVisibleInCurrentView(t) || HasVisibleMatchedSubtask(t, searchMatchIds))
             .OrderBy(t => t.Completed)
             .ThenBy(t => t.DueAt ?? DateTime.MaxValue)
             .ThenBy(t => t.SortOrder)
@@ -393,13 +393,23 @@ public partial class MainViewModel : ObservableObject
         HashSet<long>? searchMatchIds)
     {
         var today = DateTime.Today;
-        var tomorrow = filtered.Where(t => t.DueAt?.ToLocalTime().Date == today.AddDays(1)).ToList();
-        var week = filtered.Where(t =>
-        {
-            var due = t.DueAt?.ToLocalTime().Date;
-            return due > today.AddDays(1) && due <= today.AddDays(7);
-        }).ToList();
-        var later = filtered.Where(t => t.DueAt?.ToLocalTime().Date > today.AddDays(7)).ToList();
+        var dated = filtered
+            .Select(t => new { Task = t, DueDate = ResolveUpcomingGroupDate(t, searchMatchIds) })
+            .Where(x => x.DueDate is not null)
+            .ToList();
+
+        var tomorrow = dated
+            .Where(x => x.DueDate == today.AddDays(1))
+            .Select(x => x.Task)
+            .ToList();
+        var week = dated
+            .Where(x => x.DueDate > today.AddDays(1) && x.DueDate <= today.AddDays(7))
+            .Select(x => x.Task)
+            .ToList();
+        var later = dated
+            .Where(x => x.DueDate > today.AddDays(7))
+            .Select(x => x.Task)
+            .ToList();
 
         var tomorrowGroup = BuildGroup("明天", DateTime.Today.AddDays(1).ToString("M月d日 ddd"), false, tomorrow, catLookup, prevExpandedIds, searchMatchIds);
         var weekGroup = BuildGroup("本周", "未来 7 天", false, week, catLookup, prevExpandedIds, searchMatchIds);
@@ -495,6 +505,29 @@ public partial class MainViewModel : ObservableObject
             TodoView.Inbox => true,
             _ => true
         };
+    }
+
+    private bool HasVisibleMatchedSubtask(TodoTask root, HashSet<long>? searchMatchIds)
+    {
+        if (searchMatchIds is null) return false;
+
+        return _todoApi.GetSubtasks(root.Id)
+            .Select(TodoApiMapping.ToModel)
+            .Any(s => searchMatchIds.Contains(s.Id) && IsVisibleInCurrentView(s));
+    }
+
+    private DateTime? ResolveUpcomingGroupDate(TodoTask root, HashSet<long>? searchMatchIds)
+    {
+        if (IsVisibleInCurrentView(root)) return root.DueAt?.ToLocalTime().Date;
+        if (searchMatchIds is null) return null;
+
+        return _todoApi.GetSubtasks(root.Id)
+            .Select(TodoApiMapping.ToModel)
+            .Where(s => searchMatchIds.Contains(s.Id) && IsVisibleInCurrentView(s))
+            .Select(s => s.DueAt?.ToLocalTime().Date)
+            .Where(d => d is not null)
+            .OrderBy(d => d)
+            .FirstOrDefault();
     }
 
     // 待办 = 今天 + 逾期 + 未排期。一切"该现在做的"都收到这里，未来才单独划进规划。
