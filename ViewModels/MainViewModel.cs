@@ -4,9 +4,10 @@ using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using TodoFloat.Data;
+using TodoFloat.Application;
 using TodoFloat.Models;
 using TodoFloat.Services;
+using WpfApplication = System.Windows.Application;
 
 namespace TodoFloat.ViewModels;
 
@@ -43,8 +44,7 @@ public partial class MainViewModel : ObservableObject
         "#6CA6A6"
     ];
 
-    private readonly TaskRepository _tasks = new();
-    private readonly CategoryRepository _categories = new();
+    private readonly ITodoApi _todoApi;
     private readonly SettingsService _settings;
 
     public ObservableCollection<TaskItemViewModel> Tasks { get; } = new();
@@ -68,8 +68,14 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private TodoView _currentView = TodoView.Today;
 
     public MainViewModel(SettingsService settings)
+        : this(settings, TodoApiFactory.CreateDefault())
+    {
+    }
+
+    public MainViewModel(SettingsService settings, ITodoApi todoApi)
     {
         _settings = settings;
+        _todoApi = todoApi;
         _showCompleted = settings.ShowCompleted;
         _autoHideEnabled = settings.AutoHide;
         _autostartEnabled = AutostartService.IsEnabled;
@@ -247,7 +253,7 @@ public partial class MainViewModel : ObservableObject
         EnsureStarterCategories();
 
         Categories.Clear();
-        foreach (var c in _categories.GetAll()) Categories.Add(c);
+        foreach (var c in _todoApi.ListCategories().Select(TodoApiMapping.ToModel)) Categories.Add(c);
 
         // 当前筛选的分类已被删除？清掉筛选，避免列表"全消失"
         // （DB 层 ON DELETE SET NULL 已把任务 category_id 置空，但 FilterCategoryId
@@ -275,7 +281,10 @@ public partial class MainViewModel : ObservableObject
         // 当前展开的任务被收起，下沉到列表末尾，体验很怪。
         var prevExpandedIds = Tasks.Where(t => t.IsExpanded).Select(t => t.Model.Id).ToHashSet();
 
-        var allRoots = _tasks.GetAll(includeCompleted: true).Where(t => t.ParentId is null).ToList();
+        var allRoots = _todoApi
+            .ListTasks(new TodoTaskQuery(IncludeCompleted: true, RootOnly: true))
+            .Select(TodoApiMapping.ToModel)
+            .ToList();
         RecountGlobal(allRoots);
         RefreshCategoryFilters(allRoots);
 
@@ -318,12 +327,13 @@ public partial class MainViewModel : ObservableObject
         IReadOnlyList<TodoTask> matches;
         try
         {
-            matches = _tasks.Search(query);
+            matches = _todoApi.SearchTasks(query).Select(TodoApiMapping.ToModel).ToList();
         }
         catch
         {
             var q = query.Trim();
-            matches = _tasks.GetAllTasks(includeCompleted: true)
+            matches = _todoApi.ListTasks(new TodoTaskQuery(IncludeCompleted: true))
+                .Select(TodoApiMapping.ToModel)
                 .Where(t => t.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
                             || (t.Notes?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false))
                 .ToList();
@@ -437,7 +447,9 @@ public partial class MainViewModel : ObservableObject
         {
             var vm = BuildVm(roots[i], catLookup);
 
-            var subtasks = _tasks.GetSubtasks(roots[i].Id);
+            var subtasks = _todoApi.GetSubtasks(roots[i].Id)
+                .Select(TodoApiMapping.ToModel)
+                .ToList();
             var hasMatchedSubtask = searchMatchIds is not null && subtasks.Any(s => searchMatchIds.Contains(s.Id));
             // 有快照时按快照还原；无快照时保持收起。搜索命中子任务时展开父任务展示命中项。
             vm.IsExpanded = hasMatchedSubtask || (hasPrev && prevExpandedIds!.Contains(roots[i].Id));
@@ -531,8 +543,8 @@ public partial class MainViewModel : ObservableObject
 
     private void EnsureStarterCategories()
     {
-        if (_categories.GetAll().Count > 0) return;
-        if (_tasks.GetAll(includeCompleted: true).Count > 0) return;
+        if (_todoApi.ListCategories().Count > 0) return;
+        if (_todoApi.ListTasks(new TodoTaskQuery(IncludeCompleted: true, RootOnly: true)).Count > 0) return;
 
         var starter = new[]
         {
@@ -541,12 +553,7 @@ public partial class MainViewModel : ObservableObject
 
         for (var i = 0; i < starter.Length; i++)
         {
-            _categories.Insert(new Category
-            {
-                Name = starter[i].Item1,
-                Color = starter[i].Item2,
-                SortOrder = i
-            });
+            _todoApi.CreateCategory(new CreateCategoryRequest(starter[i].Item1, starter[i].Item2, i));
         }
     }
 
@@ -574,16 +581,12 @@ public partial class MainViewModel : ObservableObject
         };
 
         var categoryId = ResolveCategoryId(_chipCategoryName) ?? FilterCategoryId;
-        var t = new TodoTask
-        {
-            Title = title,
-            CategoryId = categoryId,
-            Priority = priority,
-            DueAt = due?.ToUniversalTime(),
-            SortOrder = Tasks.Count
-        };
-
-        _tasks.Insert(t);
+        _todoApi.CreateTask(new CreateTaskRequest(
+            title,
+            CategoryId: categoryId,
+            Priority: priority,
+            DueAt: due?.ToUniversalTime(),
+            SortOrder: Tasks.Count));
 
         _suppressExtract = true;
         QuickInput = string.Empty;
@@ -663,7 +666,7 @@ public partial class MainViewModel : ObservableObject
         if (vm is null) return;
 
         var completed = !vm.Completed;
-        if (!_tasks.SetCompleted(vm.Model.Id, completed))
+        if (!_todoApi.SetCompleted(vm.Model.Id, completed))
         {
             ReloadTasks();
             return;
@@ -703,7 +706,10 @@ public partial class MainViewModel : ObservableObject
     /// <summary>只重算计数器，不重建任务列表。</summary>
     private void RecountFromTasks()
     {
-        var allRoots = _tasks.GetAll(includeCompleted: true).Where(t => t.ParentId is null).ToList();
+        var allRoots = _todoApi
+            .ListTasks(new TodoTaskQuery(IncludeCompleted: true, RootOnly: true))
+            .Select(TodoApiMapping.ToModel)
+            .ToList();
         RecountGlobal(allRoots);
         RefreshCategoryFilters(allRoots);
         ActiveCount = Tasks.Count(t => !t.Completed) + Tasks.Sum(t => t.Subtasks.Count(s => !s.Completed));
@@ -718,7 +724,7 @@ public partial class MainViewModel : ObservableObject
 
     private void RefreshSubtaskStats(TaskItemViewModel parent)
     {
-        var subtasks = _tasks.GetSubtasks(parent.Model.Id);
+        var subtasks = _todoApi.GetSubtasks(parent.Model.Id).Select(TodoApiMapping.ToModel).ToList();
         parent.SetSubtaskStats(subtasks.Count, subtasks.Count(s => s.Completed));
     }
 
@@ -733,7 +739,7 @@ public partial class MainViewModel : ObservableObject
     private void Delete(TaskItemViewModel? vm)
     {
         if (vm is null) return;
-        _tasks.Delete(vm.Model.Id);
+        _todoApi.DeleteTask(vm.Model.Id);
         ReloadTasks();
     }
 
@@ -741,13 +747,10 @@ public partial class MainViewModel : ObservableObject
     private void AddSubtask(TaskItemViewModel? parent)
     {
         if (parent is null) return;
-        var t = new TodoTask
-        {
-            Title = "新子任务",
-            ParentId = parent.Model.Id,
-            SortOrder = NextSubtaskSortOrder(parent)
-        };
-        _tasks.Insert(t);
+        _todoApi.CreateTask(new CreateTaskRequest(
+            "新子任务",
+            ParentId: parent.Model.Id,
+            SortOrder: NextSubtaskSortOrder(parent)));
         ReloadTasks();
     }
 
@@ -757,13 +760,17 @@ public partial class MainViewModel : ObservableObject
         var trimmed = title?.Trim();
         if (string.IsNullOrEmpty(trimmed)) return;
 
+        var sortOrder = NextSubtaskSortOrder(parent);
         var t = new TodoTask
         {
+            Id = _todoApi.CreateTask(new CreateTaskRequest(
+                trimmed,
+                ParentId: parent.Model.Id,
+                SortOrder: sortOrder)),
             Title = trimmed,
             ParentId = parent.Model.Id,
-            SortOrder = NextSubtaskSortOrder(parent)
+            SortOrder = sortOrder
         };
-        t.Id = _tasks.Insert(t);
 
         var catLookup = Categories.ToDictionary(c => c.Id);
         parent.Subtasks.Add(BuildVm(t, catLookup));
@@ -772,7 +779,7 @@ public partial class MainViewModel : ObservableObject
 
     private int NextSubtaskSortOrder(TaskItemViewModel parent)
     {
-        return _tasks.GetSubtasks(parent.Model.Id).Count;
+        return _todoApi.GetSubtasks(parent.Model.Id).Count;
     }
 
     /// <summary>Apply a new due date/time to an existing task and persist.</summary>
@@ -781,7 +788,7 @@ public partial class MainViewModel : ObservableObject
         if (task is null) return;
         task.DueAt = due;
         task.Model.DueAt = due?.ToUniversalTime();
-        _tasks.Update(task.Model);
+        _todoApi.UpdateTask(TodoApiMapping.ToUpdateRequest(task.Model));
         // 不重建：DueAt 是排序的主键，重建会让任务"下沉"。
         // 当前视图（待办）下任务无日期仍可见，所以原地更新即可。
         // 仅在规划视图改日期可能跨组，那是已知的小不一致，等用户切 tab 自然刷新。
@@ -796,7 +803,7 @@ public partial class MainViewModel : ObservableObject
         if (string.IsNullOrEmpty(trimmed)) return;
         task.Title = trimmed;
         task.Model.Title = trimmed;
-        _tasks.Update(task.Model);
+        _todoApi.RenameTask(task.Model.Id, trimmed);
         if (!string.IsNullOrWhiteSpace(SearchText))
         {
             ReloadTasks();
@@ -816,7 +823,7 @@ public partial class MainViewModel : ObservableObject
         };
         task.Priority = priority;
         task.Model.Priority = priority;
-        _tasks.Update(task.Model);
+        _todoApi.UpdateTask(TodoApiMapping.ToUpdateRequest(task.Model));
         // 优先级也不参与排序/分组，本来就没调 ReloadTasks，这里也不需要。
     }
 
@@ -832,7 +839,7 @@ public partial class MainViewModel : ObservableObject
         task.Model.CategoryId = cat?.Id;
         task.CategoryName = cat is null ? null : LocalizeCategoryName(cat.Name);
         task.CategoryColor = cat?.Color;
-        _tasks.Update(task.Model);
+        _todoApi.UpdateTask(TodoApiMapping.ToUpdateRequest(task.Model));
         // 分类不参与排序/分组，不需要重建列表。
         RecountFromTasks();
     }
@@ -841,10 +848,10 @@ public partial class MainViewModel : ObservableObject
     private void Edit(TaskItemViewModel? vm)
     {
         if (vm is null) return;
-        var dlg = new Views.EditTaskDialog(vm, Categories.ToList(), _tasks, _categories)
+        var dlg = new Views.EditTaskDialog(vm, Categories.ToList(), _todoApi)
         {
-            Owner = Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive)
-                    ?? Application.Current.MainWindow
+            Owner = WpfApplication.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive)
+                    ?? WpfApplication.Current.MainWindow
         };
         if (dlg.ShowDialog() == true)
         {
@@ -859,7 +866,7 @@ public partial class MainViewModel : ObservableObject
         if (vm is null) return;
         vm.Priority = p;
         vm.Model.Priority = p;
-        _tasks.Update(vm.Model);
+        _todoApi.UpdateTask(TodoApiMapping.ToUpdateRequest(vm.Model));
         ReloadTasks();
     }
 
@@ -901,7 +908,7 @@ public partial class MainViewModel : ObservableObject
 
     public void PersistOrder()
     {
-        _tasks.Reorder(Tasks.Select(t => t.Model.Id));
+        _todoApi.ReorderRootTasks(Tasks.Select(t => t.Model.Id));
     }
 
     private long? ResolveCategoryId(string? name)
@@ -916,12 +923,7 @@ public partial class MainViewModel : ObservableObject
         var color = CategoryPalette[Categories.Count % CategoryPalette.Length];
         var displayName = ToTitleCase(name);
 
-        var id = _categories.Insert(new Category
-        {
-            Name = displayName,
-            Color = color,
-            SortOrder = Categories.Count
-        });
+        var id = _todoApi.CreateCategory(new CreateCategoryRequest(displayName, color, Categories.Count));
 
         Categories.Add(new Category
         {

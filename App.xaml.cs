@@ -1,13 +1,16 @@
 using System.Globalization;
 using System.Windows;
+using TodoFloat.Application;
 using TodoFloat.Data;
 using TodoFloat.Services;
+using WpfApplication = System.Windows.Application;
 
 namespace TodoFloat;
 
-public partial class App : Application
+public partial class App : WpfApplication
 {
     public static SettingsService Settings { get; } = new();
+    public static ITodoApi TodoApi { get; private set; } = null!;
     public static ReminderService Reminders { get; private set; } = null!;
 
     private static System.Threading.Mutex? _singleInstanceMutex;
@@ -37,10 +40,12 @@ public partial class App : Application
             return;
         }
 
-        Reminders = new ReminderService(new TaskRepository());
+        TodoApi = TodoApiFactory.CreateDefault();
+
+        Reminders = new ReminderService(TodoApi);
         Reminders.Start();
 
-        var win = new MainWindow();
+        var win = new MainWindow(TodoApi);
         win.Show();
     }
 
