@@ -19,6 +19,15 @@ public class TaskRepository
         return conn.Query<TodoTask>(sql).ToList();
     }
 
+    public IReadOnlyList<TodoTask> GetAllTasks(bool includeCompleted = true)
+    {
+        using var conn = Database.Open();
+        var sql = $@"SELECT {Cols} FROM tasks
+                     WHERE 1=1 {(includeCompleted ? "" : "AND completed = 0")}
+                     ORDER BY parent_id IS NOT NULL ASC, completed ASC, sort_order ASC, id ASC";
+        return conn.Query<TodoTask>(sql).ToList();
+    }
+
     public IReadOnlyList<TodoTask> GetSubtasks(long parentId)
     {
         using var conn = Database.Open();
@@ -28,15 +37,26 @@ public class TaskRepository
 
     public IReadOnlyList<TodoTask> Search(string query)
     {
-        if (string.IsNullOrWhiteSpace(query)) return GetAll();
+        if (string.IsNullOrWhiteSpace(query)) return GetAllTasks();
         using var conn = Database.Open();
+        var tokens = query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var parameters = new DynamicParameters();
+        var clauses = tokens.Select((token, i) =>
+        {
+            parameters.Add($"p{i}", $"%{EscapeLike(token)}%");
+            return $"(title LIKE @p{i} ESCAPE '\\' OR notes LIKE @p{i} ESCAPE '\\')";
+        });
         var sql = $@"SELECT {Cols} FROM tasks
-                     WHERE id IN (SELECT rowid FROM tasks_fts WHERE tasks_fts MATCH @q)
-                     ORDER BY completed ASC, sort_order ASC, id ASC";
-        var match = string.Join(" ", query.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Select(t => t + "*"));
-        return conn.Query<TodoTask>(sql, new { q = match }).ToList();
+                     WHERE {string.Join(" AND ", clauses)}
+                     ORDER BY parent_id IS NOT NULL ASC, completed ASC, sort_order ASC, id ASC";
+        return conn.Query<TodoTask>(sql, parameters).ToList();
     }
+
+    private static string EscapeLike(string value) =>
+        value
+            .Replace("\\", "\\\\")
+            .Replace("%", "\\%")
+            .Replace("_", "\\_");
 
     public long Insert(TodoTask t)
     {
@@ -84,12 +104,12 @@ public class TaskRepository
         });
     }
 
-    public void SetCompleted(long id, bool completed)
+    public bool SetCompleted(long id, bool completed)
     {
         using var conn = Database.Open();
         var now = DateTime.UtcNow.ToString("o");
-        conn.Execute(@"UPDATE tasks SET completed=@c, completed_at=@ca, updated_at=@now WHERE id=@id",
-            new { id, c = completed ? 1 : 0, ca = completed ? now : null, now });
+        return conn.Execute(@"UPDATE tasks SET completed=@c, completed_at=@ca, updated_at=@now WHERE id=@id",
+            new { id, c = completed ? 1 : 0, ca = completed ? now : null, now }) > 0;
     }
 
     public void Delete(long id)

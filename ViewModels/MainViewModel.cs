@@ -140,9 +140,9 @@ public partial class MainViewModel : ObservableObject
     };
     public Brush? QuickChipPriorityBrush => _chipPriorityRaw switch
     {
-        "!!" or "!高" => BrushFromHexStatic("#D85A45"),
-        "!" or "!中" => BrushFromHexStatic("#E8915E"),
-        "!低" => BrushFromHexStatic("#A8A8B2"),
+        "!!" or "!高" => BrushFromHexStatic("#D92D20"),
+        "!" or "!中" => BrushFromHexStatic("#F59E0B"),
+        "!低" => BrushFromHexStatic("#4F7DF3"),
         _ => null
     };
     public string? QuickChipCategoryName => _chipCategoryName;
@@ -279,9 +279,10 @@ public partial class MainViewModel : ObservableObject
         RecountGlobal(allRoots);
         RefreshCategoryFilters(allRoots);
 
+        HashSet<long>? searchMatchIds = null;
         var roots = string.IsNullOrWhiteSpace(SearchText)
             ? allRoots
-            : SearchRoots(SearchText);
+            : SearchRoots(SearchText, allRoots, out searchMatchIds);
 
         var filtered = roots
             .Where(IsVisibleInCurrentView)
@@ -295,7 +296,7 @@ public partial class MainViewModel : ObservableObject
         Tasks.Clear();
         TaskGroups.Clear();
 
-        foreach (var group in BuildGroups(filtered, catLookup, prevExpandedIds))
+        foreach (var group in BuildGroups(filtered, catLookup, prevExpandedIds, searchMatchIds))
         {
             TaskGroups.Add(group);
             foreach (var task in group.Tasks)
@@ -309,33 +310,49 @@ public partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(EmptyTitle));
     }
 
-    private IReadOnlyList<TodoTask> SearchRoots(string query)
+    private IReadOnlyList<TodoTask> SearchRoots(
+        string query,
+        IReadOnlyList<TodoTask> allRoots,
+        out HashSet<long> matchIds)
     {
+        IReadOnlyList<TodoTask> matches;
         try
         {
-            return _tasks.Search(query).Where(t => t.ParentId is null).ToList();
+            matches = _tasks.Search(query);
         }
         catch
         {
             var q = query.Trim();
-            return _tasks.GetAll(includeCompleted: true)
-                .Where(t => t.ParentId is null)
+            matches = _tasks.GetAllTasks(includeCompleted: true)
                 .Where(t => t.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
                             || (t.Notes?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false))
                 .ToList();
         }
+
+        if (!ShowCompleted)
+        {
+            matches = matches.Where(t => !t.Completed).ToList();
+        }
+
+        matchIds = matches.Select(t => t.Id).ToHashSet();
+        var rootIds = matches
+            .Select(t => t.ParentId ?? t.Id)
+            .ToHashSet();
+
+        return allRoots.Where(t => rootIds.Contains(t.Id)).ToList();
     }
 
     private IEnumerable<TaskGroupViewModel> BuildGroups(
         IReadOnlyList<TodoTask> filtered,
         Dictionary<long, Category> catLookup,
-        HashSet<long>? prevExpandedIds = null)
+        HashSet<long>? prevExpandedIds = null,
+        HashSet<long>? searchMatchIds = null)
     {
         return CurrentView switch
         {
-            TodoView.Today => BuildTodayGroups(filtered, catLookup, prevExpandedIds),
-            TodoView.Upcoming => BuildUpcomingGroups(filtered, catLookup, prevExpandedIds),
-            TodoView.Inbox => BuildInboxGroups(filtered, catLookup, prevExpandedIds),
+            TodoView.Today => BuildTodayGroups(filtered, catLookup, prevExpandedIds, searchMatchIds),
+            TodoView.Upcoming => BuildUpcomingGroups(filtered, catLookup, prevExpandedIds, searchMatchIds),
+            TodoView.Inbox => BuildInboxGroups(filtered, catLookup, prevExpandedIds, searchMatchIds),
             _ => []
         };
     }
@@ -343,7 +360,8 @@ public partial class MainViewModel : ObservableObject
     private IEnumerable<TaskGroupViewModel> BuildTodayGroups(
         IReadOnlyList<TodoTask> filtered,
         Dictionary<long, Category> catLookup,
-        HashSet<long>? prevExpandedIds)
+        HashSet<long>? prevExpandedIds,
+        HashSet<long>? searchMatchIds)
     {
         var group = BuildGroup(
             "待办",
@@ -352,6 +370,7 @@ public partial class MainViewModel : ObservableObject
             filtered,
             catLookup,
             prevExpandedIds,
+            searchMatchIds,
             showHeader: false);
 
         if (group is not null) yield return group;
@@ -360,7 +379,8 @@ public partial class MainViewModel : ObservableObject
     private IEnumerable<TaskGroupViewModel> BuildUpcomingGroups(
         IReadOnlyList<TodoTask> filtered,
         Dictionary<long, Category> catLookup,
-        HashSet<long>? prevExpandedIds)
+        HashSet<long>? prevExpandedIds,
+        HashSet<long>? searchMatchIds)
     {
         var today = DateTime.Today;
         var tomorrow = filtered.Where(t => t.DueAt?.ToLocalTime().Date == today.AddDays(1)).ToList();
@@ -371,9 +391,9 @@ public partial class MainViewModel : ObservableObject
         }).ToList();
         var later = filtered.Where(t => t.DueAt?.ToLocalTime().Date > today.AddDays(7)).ToList();
 
-        var tomorrowGroup = BuildGroup("明天", DateTime.Today.AddDays(1).ToString("M月d日 ddd"), false, tomorrow, catLookup, prevExpandedIds);
-        var weekGroup = BuildGroup("本周", "未来 7 天", false, week, catLookup, prevExpandedIds);
-        var laterGroup = BuildGroup("稍后", "已安排", false, later, catLookup, prevExpandedIds);
+        var tomorrowGroup = BuildGroup("明天", DateTime.Today.AddDays(1).ToString("M月d日 ddd"), false, tomorrow, catLookup, prevExpandedIds, searchMatchIds);
+        var weekGroup = BuildGroup("本周", "未来 7 天", false, week, catLookup, prevExpandedIds, searchMatchIds);
+        var laterGroup = BuildGroup("稍后", "已安排", false, later, catLookup, prevExpandedIds, searchMatchIds);
 
         if (tomorrowGroup is not null) yield return tomorrowGroup;
         if (weekGroup is not null) yield return weekGroup;
@@ -383,7 +403,8 @@ public partial class MainViewModel : ObservableObject
     private IEnumerable<TaskGroupViewModel> BuildInboxGroups(
         IReadOnlyList<TodoTask> filtered,
         Dictionary<long, Category> catLookup,
-        HashSet<long>? prevExpandedIds)
+        HashSet<long>? prevExpandedIds,
+        HashSet<long>? searchMatchIds)
     {
         var group = BuildGroup(
             ShowCompleted ? "全部任务" : "全部待办",
@@ -392,6 +413,7 @@ public partial class MainViewModel : ObservableObject
             filtered,
             catLookup,
             prevExpandedIds,
+            searchMatchIds,
             showHeader: false);
 
         if (group is not null) yield return group;
@@ -404,6 +426,7 @@ public partial class MainViewModel : ObservableObject
         IReadOnlyList<TodoTask> roots,
         Dictionary<long, Category> catLookup,
         HashSet<long>? prevExpandedIds = null,
+        HashSet<long>? searchMatchIds = null,
         bool showHeader = true)
     {
         if (roots.Count == 0) return null;
@@ -413,17 +436,24 @@ public partial class MainViewModel : ObservableObject
         for (var i = 0; i < roots.Count; i++)
         {
             var vm = BuildVm(roots[i], catLookup);
-            // 有快照时按快照还原；首次加载（无快照）才让首组首项自动展开。
-            vm.IsExpanded = hasPrev
-                ? prevExpandedIds!.Contains(roots[i].Id)
-                : (TaskGroups.Count == 0 && group.Tasks.Count == 0);
 
-            foreach (var s in _tasks.GetSubtasks(roots[i].Id).Where(s => ShowCompleted || !s.Completed))
+            var subtasks = _tasks.GetSubtasks(roots[i].Id);
+            var hasMatchedSubtask = searchMatchIds is not null && subtasks.Any(s => searchMatchIds.Contains(s.Id));
+            // 有快照时按快照还原；无快照时保持收起。搜索命中子任务时展开父任务展示命中项。
+            vm.IsExpanded = hasMatchedSubtask || (hasPrev && prevExpandedIds!.Contains(roots[i].Id));
+
+            var visibleSubtasks = subtasks.Where(s => ShowCompleted || !s.Completed);
+            if (searchMatchIds is not null && !searchMatchIds.Contains(roots[i].Id))
+            {
+                visibleSubtasks = visibleSubtasks.Where(s => searchMatchIds.Contains(s.Id));
+            }
+
+            foreach (var s in visibleSubtasks)
             {
                 vm.Subtasks.Add(BuildVm(s, catLookup));
             }
 
-            vm.NotifySubtasksChanged();
+            vm.SetSubtaskStats(subtasks.Count, subtasks.Count(s => s.Completed));
             group.Tasks.Add(vm);
         }
 
@@ -632,10 +662,26 @@ public partial class MainViewModel : ObservableObject
     {
         if (vm is null) return;
 
-        vm.Completed = !vm.Completed;
+        var completed = !vm.Completed;
+        if (!_tasks.SetCompleted(vm.Model.Id, completed))
+        {
+            ReloadTasks();
+            return;
+        }
+
+        vm.Completed = completed;
         vm.Model.Completed = vm.Completed;
         vm.Model.CompletedAt = vm.Completed ? DateTime.UtcNow : null;
-        _tasks.SetCompleted(vm.Model.Id, vm.Completed);
+
+        if (FindVisibleParent(vm) is { } parent)
+        {
+            if (vm.Completed && !ShowCompleted)
+            {
+                parent.Subtasks.Remove(vm);
+            }
+
+            RefreshSubtaskStats(parent);
+        }
 
         // 不重建整个列表：重建会让 CheckBox 实例销毁并新建，
         // 容易出现优先级 ring 颜色没及时复位等渲染细节 bug，而且任务会跳到底部。
@@ -663,6 +709,19 @@ public partial class MainViewModel : ObservableObject
         ActiveCount = Tasks.Count(t => !t.Completed) + Tasks.Sum(t => t.Subtasks.Count(s => !s.Completed));
     }
 
+    private TaskItemViewModel? FindVisibleParent(TaskItemViewModel vm)
+    {
+        if (vm.Model.ParentId is not { } parentId) return null;
+        return Tasks.FirstOrDefault(t => t.Model.Id == parentId)
+            ?? TaskGroups.SelectMany(g => g.Tasks).FirstOrDefault(t => t.Model.Id == parentId);
+    }
+
+    private void RefreshSubtaskStats(TaskItemViewModel parent)
+    {
+        var subtasks = _tasks.GetSubtasks(parent.Model.Id);
+        parent.SetSubtaskStats(subtasks.Count, subtasks.Count(s => s.Completed));
+    }
+
     [RelayCommand]
     private void ToggleExpanded(TaskItemViewModel? vm)
     {
@@ -686,7 +745,7 @@ public partial class MainViewModel : ObservableObject
         {
             Title = "新子任务",
             ParentId = parent.Model.Id,
-            SortOrder = parent.Subtasks.Count
+            SortOrder = NextSubtaskSortOrder(parent)
         };
         _tasks.Insert(t);
         ReloadTasks();
@@ -702,13 +761,18 @@ public partial class MainViewModel : ObservableObject
         {
             Title = trimmed,
             ParentId = parent.Model.Id,
-            SortOrder = parent.Subtasks.Count
+            SortOrder = NextSubtaskSortOrder(parent)
         };
-        _tasks.Insert(t);
+        t.Id = _tasks.Insert(t);
 
         var catLookup = Categories.ToDictionary(c => c.Id);
         parent.Subtasks.Add(BuildVm(t, catLookup));
-        parent.NotifySubtasksChanged();
+        RefreshSubtaskStats(parent);
+    }
+
+    private int NextSubtaskSortOrder(TaskItemViewModel parent)
+    {
+        return _tasks.GetSubtasks(parent.Model.Id).Count;
     }
 
     /// <summary>Apply a new due date/time to an existing task and persist.</summary>
@@ -733,6 +797,10 @@ public partial class MainViewModel : ObservableObject
         task.Title = trimmed;
         task.Model.Title = trimmed;
         _tasks.Update(task.Model);
+        if (!string.IsNullOrWhiteSpace(SearchText))
+        {
+            ReloadTasks();
+        }
     }
 
     /// <summary>Apply a priority (raw token like "!!"/"!"/"!低") to an existing task and persist.</summary>

@@ -1415,6 +1415,12 @@ public partial class MainWindow : Window
 
     private void TaskRow_LeftClick(object sender, MouseButtonEventArgs e)
     {
+        if (e.ClickCount > 1)
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (IsInteractiveElement(e.OriginalSource as DependencyObject)) return;
         if (sender is not FrameworkElement fe) return;
         if (fe.Tag is not TaskItemViewModel vm) return;
@@ -1430,34 +1436,6 @@ public partial class MainWindow : Window
         var offset = scroller.HorizontalOffset - e.Delta;
         scroller.ScrollToHorizontalOffset(Math.Clamp(offset, 0, scroller.ScrollableWidth));
         e.Handled = true;
-    }
-
-    private void TaskRow_RightClick(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is not FrameworkElement fe) return;
-        if (fe.Tag is not TaskItemViewModel vm) return;
-        var menu = new ContextMenu();
-
-        AddMenuItem(menu, "✎ 编辑", () => _vm.EditCommand.Execute(vm));
-        AddMenuItem(menu, "+ 子任务", () => _vm.AddSubtaskCommand.Execute(vm));
-        menu.Items.Add(new Separator());
-        AddMenuItem(menu, "● 高优先级", () => _vm.SetPriorityCommand.Execute((vm, Models.TaskPriority.High)));
-        AddMenuItem(menu, "● 中优先级", () => _vm.SetPriorityCommand.Execute((vm, Models.TaskPriority.Medium)));
-        AddMenuItem(menu, "● 低优先级", () => _vm.SetPriorityCommand.Execute((vm, Models.TaskPriority.Low)));
-        AddMenuItem(menu, "○ 无优先级", () => _vm.SetPriorityCommand.Execute((vm, Models.TaskPriority.None)));
-        menu.Items.Add(new Separator());
-        AddMenuItem(menu, "🗑 删除", () => _vm.DeleteCommand.Execute(vm));
-
-        menu.PlacementTarget = fe;
-        menu.IsOpen = true;
-        e.Handled = true;
-    }
-
-    private static void AddMenuItem(ContextMenu m, string header, Action onClick)
-    {
-        var mi = new MenuItem { Header = header };
-        mi.Click += (_, _) => onClick();
-        m.Items.Add(mi);
     }
 
     private void BtnSettings_Click(object sender, RoutedEventArgs e)
@@ -1539,15 +1517,30 @@ public partial class MainWindow : Window
         }
     }
 
+    private void TaskTitle_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount != 2) return;
+        if (sender is FrameworkElement el && el.DataContext is TaskItemViewModel vm)
+        {
+            BeginInlineEdit(vm);
+            e.Handled = true;
+        }
+    }
+
     // —— 子任务标题点击进入编辑态 ——
     private void SubtaskTitle_Click(object sender, MouseButtonEventArgs e)
     {
         if (sender is FrameworkElement el && el.DataContext is TaskItemViewModel vm)
         {
-            vm.EditingTitle = vm.Title;
-            vm.IsInlineEditing = true;
+            BeginInlineEdit(vm);
             e.Handled = true;
         }
+    }
+
+    private static void BeginInlineEdit(TaskItemViewModel vm)
+    {
+        vm.EditingTitle = vm.Title;
+        vm.IsInlineEditing = true;
     }
 
     private void SubtaskEdit_KeyDown(object sender, KeyEventArgs e)

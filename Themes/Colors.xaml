@@ -59,10 +59,10 @@
   <Color x:Key="C.Ink3">#857F77</Color>
   <Color x:Key="C.Ink4">#B5AEA4</Color>
 
-  <!-- 优先级：High 砖红、Med 复用 Accent、Low 中灰 -->
-  <Color x:Key="C.PriHigh">#D85A45</Color>
-  <Color x:Key="C.PriMed">#E8915E</Color>
-  <Color x:Key="C.PriLow">#A8A8B2</Color>
+  <!-- 优先级：使用分离色相，保证小旗图标也能明显区分 -->
+  <Color x:Key="C.PriHigh">#D92D20</Color>
+  <Color x:Key="C.PriMed">#F59E0B</Color>
+  <Color x:Key="C.PriLow">#4F7DF3</Color>
 
   <!-- 列表彩点 -->
   <Color x:Key="C.ListWork">#E89060</Color>

@@ -180,6 +180,9 @@
             <Trigger Property="Tag" Value="med">
               <Setter TargetName="Ring" Property="Stroke" Value="{StaticResource PriMedBrush}"/>
             </Trigger>
+            <Trigger Property="Tag" Value="low">
+              <Setter TargetName="Ring" Property="Stroke" Value="{StaticResource PriLowBrush}"/>
+            </Trigger>
             <Trigger Property="IsChecked" Value="True">
               <Setter TargetName="Ring" Property="Fill" Value="{StaticResource Accent}"/>
               <Setter TargetName="Ring" Property="Stroke" Value="{StaticResource Accent}"/>
