@@ -424,17 +424,23 @@
                                         <ItemsControl ItemsSource="{Binding Tasks}">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate DataType="{x:Type vm:TaskItemViewModel}">
-                                                    <StackPanel Margin="0,0,0,2">
+                                                    <StackPanel Margin="0,0,0,6">
                                                         <Border Tag="{Binding}"
-                                                                CornerRadius="{Binding RowCornerRadius}"
                                                                 MouseLeftButtonUp="TaskRow_LeftClick"
                                                                 MouseRightButtonUp="TaskRow_RightClick">
                                                             <Border.Style>
                                                                 <Style TargetType="Border" BasedOn="{StaticResource TaskRow}">
+                                                                    <Setter Property="CornerRadius" Value="12"/>
                                                                     <Style.Triggers>
                                                                         <DataTrigger Binding="{Binding IsExpanded}" Value="True">
                                                                             <Setter Property="Background" Value="{StaticResource AccentSoftBrush}"/>
                                                                             <Setter Property="BorderThickness" Value="0"/>
+                                                                            <Setter Property="CornerRadius" Value="12,12,0,0"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding IsAnimating, ElementName=ExpandHost}" Value="True">
+                                                                            <Setter Property="Background" Value="{StaticResource AccentSoftBrush}"/>
+                                                                            <Setter Property="BorderThickness" Value="0"/>
+                                                                            <Setter Property="CornerRadius" Value="12,12,0,0"/>
                                                                         </DataTrigger>
                                                                     </Style.Triggers>
                                                                 </Style>
@@ -509,6 +515,9 @@
                                                                             <Style TargetType="StackPanel">
                                                                                 <Style.Triggers>
                                                                                     <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                    </DataTrigger>
+                                                                                    <DataTrigger Binding="{Binding IsAnimating, ElementName=ExpandHost}" Value="True">
                                                                                         <Setter Property="Visibility" Value="Collapsed"/>
                                                                                     </DataTrigger>
                                                                                 </Style.Triggers>
@@ -595,14 +604,27 @@
                                                             </Grid>
                                                         </Border>
 
-                                                        <Border Background="{StaticResource AccentSoftBrush}"
+                                                        <ctl:AnimatedExpander x:Name="ExpandHost"
+                                                                              IsExpanded="{Binding IsExpanded}"
+                                                                              ExpandDuration="0:0:0.34"
+                                                                              CollapseDuration="0:0:0.17"
+                                                                              FocusVisualStyle="{x:Null}"
+                                                                              Focusable="False"
+                                                                              IsHitTestVisible="{Binding IsExpanded}"
+                                                                              SnapsToDevicePixels="True">
+                                                        <Border x:Name="ExpandPane"
+                                                                Background="{StaticResource AccentSoftBrush}"
                                                                 BorderBrush="{StaticResource Line2Brush}"
                                                                 BorderThickness="0,1,0,0"
                                                                 CornerRadius="{Binding DetailCornerRadius}"
                                                                 Padding="0"
                                                                 FocusVisualStyle="{x:Null}"
                                                                 Focusable="False"
-                                                                Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVisibility}}">
+                                                                Opacity="0"
+                                                                RenderTransformOrigin="0.5,0">
+                                                            <Border.RenderTransform>
+                                                                <TranslateTransform x:Name="ExpandContentShift" Y="-4"/>
+                                                            </Border.RenderTransform>
                                                             <Grid>
                                                                 <StackPanel Margin="46,7,14,12">
                                                                 <Grid Margin="0,0,0,8">
@@ -986,7 +1008,49 @@
                                                                 </StackPanel>
                                                             </Grid>
                                                         </Border>
+                                                        </ctl:AnimatedExpander>
                                                     </StackPanel>
+                                                    <DataTemplate.Triggers>
+                                                        <!-- 展开高度由 AnimatedExpander 处理，这里只做内容淡入和轻微位移。 -->
+                                                        <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                                            <DataTrigger.EnterActions>
+                                                                <BeginStoryboard>
+                                                                    <Storyboard>
+                                                                        <DoubleAnimation Storyboard.TargetName="ExpandPane" Storyboard.TargetProperty="Opacity"
+                                                                                         To="1" Duration="0:0:0.22" BeginTime="0:0:0.05">
+                                                                            <DoubleAnimation.EasingFunction>
+                                                                                <CubicEase EasingMode="EaseOut"/>
+                                                                            </DoubleAnimation.EasingFunction>
+                                                                        </DoubleAnimation>
+                                                                        <DoubleAnimation Storyboard.TargetName="ExpandContentShift" Storyboard.TargetProperty="Y"
+                                                                                         To="0" Duration="0:0:0.32">
+                                                                            <DoubleAnimation.EasingFunction>
+                                                                                <CubicEase EasingMode="EaseOut"/>
+                                                                            </DoubleAnimation.EasingFunction>
+                                                                        </DoubleAnimation>
+                                                                    </Storyboard>
+                                                                </BeginStoryboard>
+                                                            </DataTrigger.EnterActions>
+                                                            <DataTrigger.ExitActions>
+                                                                <BeginStoryboard>
+                                                                    <Storyboard>
+                                                                        <DoubleAnimation Storyboard.TargetName="ExpandPane" Storyboard.TargetProperty="Opacity"
+                                                                                         To="0" Duration="0:0:0.10">
+                                                                            <DoubleAnimation.EasingFunction>
+                                                                                <CubicEase EasingMode="EaseIn"/>
+                                                                            </DoubleAnimation.EasingFunction>
+                                                                        </DoubleAnimation>
+                                                                        <DoubleAnimation Storyboard.TargetName="ExpandContentShift" Storyboard.TargetProperty="Y"
+                                                                                         To="-4" Duration="0:0:0.14">
+                                                                            <DoubleAnimation.EasingFunction>
+                                                                                <CubicEase EasingMode="EaseIn"/>
+                                                                            </DoubleAnimation.EasingFunction>
+                                                                        </DoubleAnimation>
+                                                                    </Storyboard>
+                                                                </BeginStoryboard>
+                                                            </DataTrigger.ExitActions>
+                                                        </DataTrigger>
+                                                    </DataTemplate.Triggers>
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>

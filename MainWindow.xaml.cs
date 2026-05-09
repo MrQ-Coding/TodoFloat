@@ -40,8 +40,9 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _autoHideTimer;
     private bool _isHidden;
     private bool _isAnimating;
-    private const double PeekWidth = 5;
-    private const double TriggerWidth = 6;
+    // 顶部贴边：贴边后露出 2px 当作"勾住"的边沿；TriggerSize 略大让指针更容易唤醒
+    private const double PeekSize = 2;
+    private const double TriggerSize = 4;
 
     public MainWindow()
     {
@@ -52,7 +53,8 @@ public partial class MainWindow : Window
         _saveDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
         _saveDebounce.Tick += (_, _) => { _saveDebounce.Stop(); SaveBounds(); };
 
-        _autoHideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
+        // 25ms 轮询：~40Hz，几乎跟刷新率同步，鼠标到顶立刻感知
+        _autoHideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(25) };
         _autoHideTimer.Tick += AutoHideTick;
 
         SourceInitialized += MainWindow_SourceInitialized;
@@ -66,6 +68,8 @@ public partial class MainWindow : Window
 
         Loaded += (_, _) =>
         {
+            // 启动时如果还是最大化态（上次崩了或异常），先还原避免锁死
+            if (WindowState == WindowState.Maximized) WindowState = WindowState.Normal;
             RestoreWindowBounds();
             _autoHideTimer.Start();
             HookCategoryOverflowPanel();
@@ -146,6 +150,8 @@ public partial class MainWindow : Window
         var hit = e.OriginalSource as DependencyObject;
         if (!IsInDragBar(hit)) return;
         if (_isHidden) ShowSidebar();
+        // 兜底：万一窗口不知怎么进了最大化态，先还原才能 DragMove
+        if (WindowState == WindowState.Maximized) WindowState = WindowState.Normal;
         try { DragMove(); } catch { /* drag race */ }
         SnapToEdge();
     }
@@ -167,15 +173,11 @@ public partial class MainWindow : Window
     {
         var wa = SystemParameters.WorkArea;
         const double snapDistance = 24;
-        if (Math.Abs(Left + Width - wa.Right) < snapDistance)
+        // 仅检测顶部贴边（左右贴边已废弃）
+        if (Math.Abs(Top - wa.Top) < snapDistance)
         {
-            Left = wa.Right - Width;
-            _settings.SnapEdge = "right";
-        }
-        else if (Math.Abs(Left - wa.Left) < snapDistance)
-        {
-            Left = wa.Left;
-            _settings.SnapEdge = "left";
+            Top = wa.Top;
+            _settings.SnapEdge = "top";
         }
         else
         {
@@ -185,11 +187,11 @@ public partial class MainWindow : Window
     }
 
     private int _awayTicks;
-    private const int HideAfterTicks = 3; // ~360ms at 120ms interval
+    private const int HideAfterTicks = 8; // ~200ms at 25ms interval（保留一点防误触）
 
     private void AutoHideTick(object? sender, EventArgs e)
     {
-        if (!_vm.AutoHideEnabled || _settings.SnapEdge == "none")
+        if (!_vm.AutoHideEnabled || _settings.SnapEdge != "top")
         {
             if (_isHidden) ShowSidebar();
             _awayTicks = 0;
@@ -197,7 +199,6 @@ public partial class MainWindow : Window
         }
         if (_isAnimating) return;
 
-        var edge = _settings.SnapEdge;
         var wa = SystemParameters.WorkArea;
 
         if (!GetCursorPos(out var p)) return;
@@ -205,27 +206,25 @@ public partial class MainWindow : Window
         var mx = p.X / dpi.DpiScaleX;
         var my = p.Y / dpi.DpiScaleY;
 
-        // Use the snapped (visible) position as reference, not current Left (which is offscreen when hidden)
-        double visLeft = edge == "right" ? wa.Right - Width : wa.Left;
-        double visRight = visLeft + Width;
+        // 显示态时窗口的可见区域：贴顶 → 顶部坐标 = wa.Top
+        double visTop = wa.Top;
+        double visBottom = visTop + Height;
 
-        var overVisibleArea = mx >= visLeft - 2 && mx <= visRight + 2 && my >= Top - 2 && my <= Top + Height + 2;
+        var overVisibleArea = mx >= Left - 2 && mx <= Left + Width + 2 && my >= visTop - 2 && my <= visBottom + 2;
         var keyboardFocus = IsKeyboardFocusWithin || IsActive;
 
-        bool inTriggerZone = edge == "right"
-            ? mx >= wa.Right - TriggerWidth && my >= Top && my <= Top + Height
-            : mx <= wa.Left + TriggerWidth && my >= Top && my <= Top + Height;
+        // 触发条带：屏幕顶 TriggerSize 像素，且横向在窗口宽度范围内
+        bool inTriggerZone = my <= wa.Top + TriggerSize && mx >= Left && mx <= Left + Width;
 
         if (!_isHidden)
         {
-            // Don't auto-hide while user is interacting
             if (overVisibleArea || keyboardFocus || inTriggerZone)
             {
                 _awayTicks = 0;
             }
             else if (++_awayTicks >= HideAfterTicks)
             {
-                HideSidebar(edge);
+                HideSidebar(_settings.SnapEdge);
             }
         }
         else
@@ -239,16 +238,17 @@ public partial class MainWindow : Window
         if (_isHidden || _isAnimating) return;
         _isAnimating = true;
         var wa = SystemParameters.WorkArea;
-        var target = edge == "right" ? wa.Right - PeekWidth : wa.Left - Width + PeekWidth;
+        // 顶部贴边：把整窗向上推，只在屏幕顶部留 PeekSize 高度
+        var target = wa.Top - Height + PeekSize;
         var anim = new DoubleAnimation
         {
-            From = Left,
+            From = Top,
             To = target,
-            Duration = TimeSpan.FromMilliseconds(180),
+            Duration = TimeSpan.FromMilliseconds(70),
             EasingFunction = new System.Windows.Media.Animation.QuadraticEase { EasingMode = EasingMode.EaseOut }
         };
         anim.Completed += (_, _) => { _isAnimating = false; _isHidden = true; };
-        BeginAnimation(LeftProperty, anim);
+        BeginAnimation(TopProperty, anim);
     }
 
     private void ShowSidebar()
@@ -256,24 +256,23 @@ public partial class MainWindow : Window
         if (!_isHidden && !_isAnimating) return;
         _isAnimating = true;
         var wa = SystemParameters.WorkArea;
-        var edge = _settings.SnapEdge;
-        var target = edge == "left" ? wa.Left : wa.Right - Width;
+        var target = wa.Top;
         var anim = new DoubleAnimation
         {
-            From = Left,
+            From = Top,
             To = target,
-            Duration = TimeSpan.FromMilliseconds(180),
+            Duration = TimeSpan.FromMilliseconds(70),
             EasingFunction = new System.Windows.Media.Animation.QuadraticEase { EasingMode = EasingMode.EaseOut }
         };
         anim.Completed += (_, _) =>
         {
             _isAnimating = false;
             _isHidden = false;
-            BeginAnimation(LeftProperty, null);
-            Left = target;
+            BeginAnimation(TopProperty, null);
+            Top = target;
             _awayTicks = 0;
         };
-        BeginAnimation(LeftProperty, anim);
+        BeginAnimation(TopProperty, anim);
     }
 
     private void NewTaskBox_KeyDown(object sender, KeyEventArgs e)
@@ -1368,8 +1367,9 @@ public partial class MainWindow : Window
 
     private void BtnSearch_Click(object sender, RoutedEventArgs e)
     {
-        // 切换搜索/添加：共用 NewTaskBox。OnIsSearchModeChanged 会清空 QuickInput/SearchText
-        _vm.IsSearchMode = !_vm.IsSearchMode;
+        // 🔍 是"进入搜索"动作，不是开关：已在搜索态再点只重新聚焦输入框
+        // 退出搜索请用 Esc / 点击输入框外区域
+        if (!_vm.IsSearchMode) _vm.IsSearchMode = true;
         Dispatcher.BeginInvoke(new Action(() => { NewTaskBox.Focus(); NewTaskBox.SelectAll(); }),
             System.Windows.Threading.DispatcherPriority.Input);
     }
@@ -1394,6 +1394,21 @@ public partial class MainWindow : Window
     {
         if (sender is CheckBox cb && cb.DataContext is TaskItemViewModel vm)
         {
+            // 缩放脉冲做视觉反馈：1 → 1.25 → 1，~160ms
+            var scale = new ScaleTransform(1, 1);
+            cb.RenderTransform = scale;
+            cb.RenderTransformOrigin = new Point(0.5, 0.5);
+            var anim = new DoubleAnimation
+            {
+                From = 1.0,
+                To = 1.25,
+                Duration = TimeSpan.FromMilliseconds(80),
+                AutoReverse = true,
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+            };
+            scale.BeginAnimation(ScaleTransform.ScaleXProperty, anim);
+            scale.BeginAnimation(ScaleTransform.ScaleYProperty, anim);
+
             _vm.ToggleCompleteCommand.Execute(vm);
         }
     }
@@ -1647,6 +1662,20 @@ public partial class MainWindow : Window
 
     private void MainWindow_StateChanged(object? sender, EventArgs e)
     {
+        // 拖到屏幕顶端时 Windows 会用 Aero Snap 强制最大化，跟我们自己的"顶部贴边"
+        // 撞车 —— 最大化态下 DragMove 不工作、ResizeMode 也失灵。
+        // 拦下来：立刻还原 Normal，并替我们自己执行一次顶部贴边。
+        if (WindowState == WindowState.Maximized)
+        {
+            WindowState = WindowState.Normal;
+            var wa = SystemParameters.WorkArea;
+            Top = wa.Top;
+            if (Left < wa.Left) Left = wa.Left;
+            if (Left + Width > wa.Right) Left = wa.Right - Width;
+            _settings.SnapEdge = "top";
+            SaveBounds();
+            return;
+        }
         // 从最小化恢复后把 ShowInTaskbar 关回去，回到纯悬浮窗形态。
         if (WindowState == WindowState.Normal && ShowInTaskbar)
         {

@@ -249,6 +249,22 @@ public partial class MainViewModel : ObservableObject
         Categories.Clear();
         foreach (var c in _categories.GetAll()) Categories.Add(c);
 
+        // 当前筛选的分类已被删除？清掉筛选，避免列表"全消失"
+        // （DB 层 ON DELETE SET NULL 已把任务 category_id 置空，但 FilterCategoryId
+        //   还停在旧 ID 上，IsVisibleInCurrentView 会把所有任务都过滤掉）
+        if (FilterCategoryId is { } fid && Categories.All(c => c.Id != fid))
+        {
+            FilterCategoryId = null; // setter 会触发 OnFilterCategoryIdChanged → ReloadTasks
+            return;
+        }
+
+        // 草稿 chip 也清一下，避免新建任务时挂到一个已不存在的分类名
+        if (!string.IsNullOrEmpty(_chipCategoryName)
+            && ResolveCategoryId(_chipCategoryName) is null)
+        {
+            ClearCategoryChip();
+        }
+
         ReloadTasks();
     }
 
@@ -490,10 +506,7 @@ public partial class MainViewModel : ObservableObject
 
         var starter = new[]
         {
-            ("工作", "#E8915E"),
-            ("个人", "#7B98E8"),
-            ("设计", "#5FB58A"),
-            ("家庭", "#C57BB8")
+            ("个人", "#7B98E8")
         };
 
         for (var i = 0; i < starter.Length; i++)

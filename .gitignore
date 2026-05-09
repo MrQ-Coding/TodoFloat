@@ -85,6 +85,7 @@ $RECYCLE.BIN/
 
 # Dev-time UI verification screenshots
 ui-check*.png
+ui-*.png
 *_check.png
 strikethrough_check*.png
 deferred_check.png
