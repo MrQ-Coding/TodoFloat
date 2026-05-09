@@ -22,6 +22,8 @@ public partial class TaskItemViewModel : ObservableObject
     [ObservableProperty] private bool _isInlineEditing;
     [ObservableProperty] private string _editingTitle = string.Empty;
     [ObservableProperty] private ObservableCollection<TaskItemViewModel> _subtasks = new();
+    private int _subtaskTotalCount;
+    private int _subtaskCompletedCount;
 
     public TaskItemViewModel(TodoTask t)
     {
@@ -42,9 +44,9 @@ public partial class TaskItemViewModel : ObservableObject
 
     public Brush PriorityBrush => Priority switch
     {
-        TaskPriority.High => BrushFromHex("#D85A45"),
-        TaskPriority.Medium => BrushFromHex("#E8915E"),
-        TaskPriority.Low => BrushFromHex("#A8A8B2"),
+        TaskPriority.High => BrushFromHex("#D92D20"),
+        TaskPriority.Medium => BrushFromHex("#F59E0B"),
+        TaskPriority.Low => BrushFromHex("#4F7DF3"),
         _ => Brushes.Transparent
     };
 
@@ -96,20 +98,19 @@ public partial class TaskItemViewModel : ObservableObject
     {
         get
         {
-            if (Subtasks.Count == 0) return string.Empty;
-            var done = Subtasks.Count(s => s.Completed);
-            return $"{done}/{Subtasks.Count}";
+            if (_subtaskTotalCount == 0) return string.Empty;
+            return $"{_subtaskCompletedCount}/{_subtaskTotalCount}";
         }
     }
 
-    public bool HasSubtasks => Subtasks.Count > 0;
+    public bool HasSubtasks => _subtaskTotalCount > 0;
 
     public double SubtaskProgress
     {
         get
         {
-            if (Subtasks.Count == 0) return 0;
-            return Subtasks.Count(s => s.Completed) * 100.0 / Subtasks.Count;
+            if (_subtaskTotalCount == 0) return 0;
+            return _subtaskCompletedCount * 100.0 / _subtaskTotalCount;
         }
     }
 
@@ -144,6 +145,13 @@ public partial class TaskItemViewModel : ObservableObject
 
     public void NotifySubtasksChanged()
     {
+        SetSubtaskStats(Subtasks.Count, Subtasks.Count(s => s.Completed));
+    }
+
+    public void SetSubtaskStats(int totalCount, int completedCount)
+    {
+        _subtaskTotalCount = Math.Max(0, totalCount);
+        _subtaskCompletedCount = Math.Clamp(completedCount, 0, _subtaskTotalCount);
         OnPropertyChanged(nameof(SubtaskSummary));
         OnPropertyChanged(nameof(HasSubtasks));
         OnPropertyChanged(nameof(SubtaskProgress));

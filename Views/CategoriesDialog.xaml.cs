@@ -8,9 +8,8 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Shapes;
-using TodoFloat.Data;
+using TodoFloat.Application;
 using TodoFloat.Models;
-using TodoFloat.ViewModels;
 
 namespace TodoFloat.Views;
 
@@ -26,14 +25,13 @@ public partial class CategoriesDialog : Window
         "#6CA6A6"
     ];
 
-    private readonly MainViewModel _main;
-    private readonly CategoryRepository _repo = new();
+    private readonly ITodoApi _todoApi;
     private string _selectedColor = Palette[0];
 
-    public CategoriesDialog(MainViewModel main)
+    public CategoriesDialog(ITodoApi todoApi)
     {
         InitializeComponent();
-        _main = main;
+        _todoApi = todoApi;
         BuildColorPalette();
         Refresh();
         SourceInitialized += (_, _) => ApplyDwmRoundedCorners();
@@ -77,7 +75,10 @@ public partial class CategoriesDialog : Window
     {
         CatList.ItemsSource = null;
         // 倒序展示：最新加的（id 最大）排在最上面
-        var all = _repo.GetAll().OrderByDescending(c => c.Id).ToList();
+        var all = _todoApi.ListCategories()
+            .Select(TodoApiMapping.ToModel)
+            .OrderByDescending(c => c.Id)
+            .ToList();
         CatList.ItemsSource = all;
         var idx = all.Count % Palette.Length;
         SetSelectedColor(Palette[idx]);
@@ -171,7 +172,7 @@ public partial class CategoriesDialog : Window
     {
         var name = NewNameBox.Text.Trim();
         if (string.IsNullOrEmpty(name)) return;
-        _repo.Insert(new Category { Name = name, Color = _selectedColor, SortOrder = 99 });
+        _todoApi.CreateCategory(new CreateCategoryRequest(name, _selectedColor, 99));
         NewNameBox.Text = string.Empty;
         Refresh();
     }
@@ -180,7 +181,7 @@ public partial class CategoriesDialog : Window
     {
         if (sender is Button b && b.Tag is Category c)
         {
-            _repo.Delete(c.Id);
+            _todoApi.DeleteCategory(c.Id);
             Refresh();
         }
     }

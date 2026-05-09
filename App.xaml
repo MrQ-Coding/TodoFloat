@@ -11,6 +11,17 @@
 
             <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
 
+            <Style x:Key="{x:Static SystemParameters.FocusVisualStyleKey}"
+                   TargetType="{x:Type Control}">
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type Control}">
+                            <Border/>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
             <TextDecorationCollection x:Key="StrikethroughCentered">
                 <TextDecoration Location="Strikethrough"
                                 PenOffset="-0.05"

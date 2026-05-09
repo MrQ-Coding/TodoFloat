@@ -386,7 +386,9 @@
                           Padding="12,10,12,8">
                 <!-- MinHeight 绑到 viewport，让空状态可在视口内垂直居中 -->
                 <Grid MinHeight="{Binding ViewportHeight, ElementName=MainScroller}">
-                    <ItemsControl ItemsSource="{Binding TaskGroups}">
+                    <ItemsControl ItemsSource="{Binding TaskGroups}"
+                                  FocusVisualStyle="{x:Null}"
+                                  Focusable="False">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type vm:TaskGroupViewModel}">
                                 <StackPanel Margin="0,0,0,14">
@@ -421,13 +423,15 @@
                                             BorderThickness="0"
                                             CornerRadius="12"
                                             ClipToBounds="False">
-                                        <ItemsControl ItemsSource="{Binding Tasks}">
+                                        <ItemsControl ItemsSource="{Binding Tasks}"
+                                                      FocusVisualStyle="{x:Null}"
+                                                      Focusable="False">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate DataType="{x:Type vm:TaskItemViewModel}">
                                                     <StackPanel Margin="0,0,0,6">
-                                                        <Border Tag="{Binding}"
-                                                                MouseLeftButtonUp="TaskRow_LeftClick"
-                                                                MouseRightButtonUp="TaskRow_RightClick">
+                                                        <Border x:Name="TaskRow"
+                                                                Tag="{Binding}"
+                                                                MouseLeftButtonUp="TaskRow_LeftClick">
                                                             <Border.Style>
                                                                 <Style TargetType="Border" BasedOn="{StaticResource TaskRow}">
                                                                     <Setter Property="CornerRadius" Value="12"/>
@@ -451,9 +455,10 @@
                                                                     <ColumnDefinition Width="14"/>
                                                                     <ColumnDefinition Width="*"/>
                                                                     <ColumnDefinition Width="Auto"/>
+                                                                    <ColumnDefinition Width="24"/>
                                                                 </Grid.ColumnDefinitions>
 
-                                                                <Border Grid.ColumnSpan="4"
+                                                                <Border Grid.ColumnSpan="5"
                                                                         Width="2.5"
                                                                         HorizontalAlignment="Left"
                                                                         Margin="-6,2,0,0"
@@ -496,18 +501,47 @@
                                                                           VerticalAlignment="Top"/>
 
                                                                 <StackPanel Grid.Column="2" Margin="10,0,8,0">
-                                                                    <TextBlock Text="{Binding Title}">
-                                                                        <TextBlock.Style>
-                                                                            <Style TargetType="TextBlock" BasedOn="{StaticResource TaskTitleText}">
-                                                                                <Style.Triggers>
-                                                                                    <DataTrigger Binding="{Binding Completed}" Value="True">
-                                                                                        <Setter Property="TextDecorations" Value="{StaticResource StrikethroughCentered}"/>
-                                                                                        <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
-                                                                                    </DataTrigger>
-                                                                                </Style.Triggers>
-                                                                            </Style>
-                                                                        </TextBlock.Style>
-                                                                    </TextBlock>
+                                                                    <Grid>
+                                                                        <TextBlock x:Name="TaskTitleText"
+                                                                                   Text="{Binding Title}"
+                                                                                   Cursor="Arrow"
+                                                                                   MouseLeftButtonDown="TaskTitle_MouseLeftButtonDown">
+                                                                            <TextBlock.Style>
+                                                                                <Style TargetType="TextBlock" BasedOn="{StaticResource TaskTitleText}">
+                                                                                    <Style.Triggers>
+                                                                                        <DataTrigger Binding="{Binding Completed}" Value="True">
+                                                                                            <Setter Property="TextDecorations" Value="{StaticResource StrikethroughCentered}"/>
+                                                                                            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                                                                                        </DataTrigger>
+                                                                                        <DataTrigger Binding="{Binding IsInlineEditing}" Value="True">
+                                                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                        </DataTrigger>
+                                                                                    </Style.Triggers>
+                                                                                </Style>
+                                                                            </TextBlock.Style>
+                                                                        </TextBlock>
+                                                                        <TextBox Text="{Binding EditingTitle, UpdateSourceTrigger=PropertyChanged}"
+                                                                                 FontSize="14"
+                                                                                 FontWeight="SemiBold"
+                                                                                 Padding="2,0"
+                                                                                 BorderThickness="0"
+                                                                                 Background="Transparent"
+                                                                                 VerticalContentAlignment="Center"
+                                                                                 KeyDown="SubtaskEdit_KeyDown"
+                                                                                 LostFocus="SubtaskEdit_LostFocus"
+                                                                                 IsVisibleChanged="SubtaskEdit_IsVisibleChanged">
+                                                                            <TextBox.Style>
+                                                                                <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+                                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                    <Style.Triggers>
+                                                                                        <DataTrigger Binding="{Binding IsInlineEditing}" Value="True">
+                                                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                                                        </DataTrigger>
+                                                                                    </Style.Triggers>
+                                                                                </Style>
+                                                                            </TextBox.Style>
+                                                                        </TextBox>
+                                                                    </Grid>
 
                                                                     <!-- Title 下的 meta 摘要：仅折叠态显示；展开后由 chip 区接管，避免重复 -->
                                                                     <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
@@ -518,6 +552,9 @@
                                                                                         <Setter Property="Visibility" Value="Collapsed"/>
                                                                                     </DataTrigger>
                                                                                     <DataTrigger Binding="{Binding IsAnimating, ElementName=ExpandHost}" Value="True">
+                                                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                    </DataTrigger>
+                                                                                    <DataTrigger Binding="{Binding IsInlineEditing}" Value="True">
                                                                                         <Setter Property="Visibility" Value="Collapsed"/>
                                                                                     </DataTrigger>
                                                                                 </Style.Triggers>
@@ -583,15 +620,14 @@
                                                                     </StackPanel>
                                                                 </StackPanel>
 
-                                                                <!-- 右侧优先级旗：折叠态 / 展开态都显示，让标题区随时能看到优先级 -->
-                                                                <TextBlock Grid.Column="3"
-                                                                           Text="&#xE7C1;"
-                                                                           FontFamily="Segoe MDL2 Assets"
-                                                                           Foreground="{Binding PriorityBrush}"
-                                                                           FontSize="12"
-                                                                           VerticalAlignment="Top">
-                                                                    <TextBlock.Style>
-                                                                        <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                                                <!-- 右侧优先级旗：使用固定槽位 + Path，避免字体 glyph 的 baseline 偏移。 -->
+                                                                <Grid Grid.Column="3"
+                                                                      Width="18"
+                                                                      Height="18"
+                                                                      HorizontalAlignment="Center"
+                                                                      VerticalAlignment="Top">
+                                                                    <Grid.Style>
+                                                                        <Style TargetType="Grid">
                                                                             <Setter Property="Visibility" Value="Visible"/>
                                                                             <Style.Triggers>
                                                                                 <DataTrigger Binding="{Binding PriorityKey}" Value="none">
@@ -599,8 +635,42 @@
                                                                                 </DataTrigger>
                                                                             </Style.Triggers>
                                                                         </Style>
-                                                                    </TextBlock.Style>
-                                                                </TextBlock>
+                                                                    </Grid.Style>
+                                                                    <Path Width="12"
+                                                                          Height="12"
+                                                                          HorizontalAlignment="Center"
+                                                                          VerticalAlignment="Center"
+                                                                          Data="M 2.5 1.5 L 2.5 11 M 3 2.2 C 4.8 1.3 6.2 2.9 8 2.1 C 9.2 1.6 10.2 1.9 11 2.4 L 11 7.4 C 9.9 6.9 8.8 6.7 7.6 7.2 C 5.8 8 4.4 6.3 2.5 7.2"
+                                                                          Stretch="Fill"
+                                                                          Stroke="{Binding PriorityBrush}"
+                                                                          StrokeThickness="1.35"
+                                                                          StrokeStartLineCap="Round"
+                                                                          StrokeEndLineCap="Round"
+                                                                          StrokeLineJoin="Round"/>
+                                                                </Grid>
+
+                                                                <Button Grid.Column="4"
+                                                                        Width="20"
+                                                                        Height="20"
+                                                                        FontSize="10"
+                                                                        Content="&#xE74D;"
+                                                                        ToolTip="删除"
+                                                                        VerticalAlignment="Top"
+                                                                        Command="{Binding DataContext.DeleteCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                        CommandParameter="{Binding}">
+                                                                    <Button.Style>
+                                                                        <Style TargetType="Button" BasedOn="{StaticResource GlyphButton}">
+                                                                            <Setter Property="Opacity" Value="0"/>
+                                                                            <Setter Property="IsHitTestVisible" Value="False"/>
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding IsMouseOver, ElementName=TaskRow}" Value="True">
+                                                                                    <Setter Property="Opacity" Value="1"/>
+                                                                                    <Setter Property="IsHitTestVisible" Value="True"/>
+                                                                                </DataTrigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </Button.Style>
+                                                                </Button>
                                                             </Grid>
                                                         </Border>
 
@@ -795,12 +865,12 @@
                                                                 </Border>
 
                                                                 <ItemsControl ItemsSource="{Binding Subtasks}"
-                                                                              FocusVisualStyle="{x:Null}">
+                                                                              FocusVisualStyle="{x:Null}"
+                                                                              Focusable="False">
                                                                     <ItemsControl.ItemTemplate>
                                                                         <DataTemplate DataType="{x:Type vm:TaskItemViewModel}">
                                                                             <Border x:Name="SubRow"
                                                                                     FocusVisualStyle="{x:Null}"
-                                                                                    MouseRightButtonUp="TaskRow_RightClick"
                                                                                     Tag="{Binding}">
                                                                                 <Border.Style>
                                                                                     <Style TargetType="Border">
@@ -1111,7 +1181,9 @@
                 <Grid>
                     <!-- 单行自适应：按数量降序排列；放不下的不渲染，但 OverflowHidePanel 会留出 30px 给右侧的 "…" -->
                     <ItemsControl x:Name="CategoryFilterStrip"
-                                  ItemsSource="{Binding CategoryFilters}">
+                                  ItemsSource="{Binding CategoryFilters}"
+                                  FocusVisualStyle="{x:Null}"
+                                  Focusable="False">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <ctl:OverflowHidePanel OverflowIndicatorWidth="34"/>
@@ -1191,7 +1263,9 @@
                         CornerRadius="10"
                         Padding="6"
                         MinWidth="160">
-                    <ItemsControl x:Name="CategoryOverflowList">
+                    <ItemsControl x:Name="CategoryOverflowList"
+                                  FocusVisualStyle="{x:Null}"
+                                  Focusable="False">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <StackPanel Orientation="Vertical"/>
