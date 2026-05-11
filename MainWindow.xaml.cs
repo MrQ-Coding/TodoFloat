@@ -1,12 +1,15 @@
 using System.Linq;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using TodoFloat.Controls;
@@ -31,6 +34,51 @@ public partial class MainWindow : Window
     // 底部分类筛选条的溢出面板引用 + 当前隐藏项快照
     private OverflowHidePanel? _categoryOverflowPanel;
     private System.Collections.Generic.List<CategoryFilterViewModel> _hiddenCategoryFilters = new();
+    private Point? _taskDragStartPoint;
+    private TaskItemViewModel? _taskDragSource;
+    private bool _suppressTaskRowClick;
+    private IReadOnlyList<long>? _taskDragOriginalOrder;
+    private FrameworkElement? _taskDragRow;
+    private double _taskDragRowOpacity;
+    private TaskDragAdorner? _taskDragAdorner;
+    private AdornerLayer? _taskDragAdornerLayer;
+    private Point _taskDragOffset;
+    private bool _isTaskDragging;
+    private bool _hasTaskDragPreview;
+    private bool _isFinishingTaskDrag;
+    private long? _lastTaskDragTargetId;
+    private bool _lastTaskDragInsertAfter;
+    private Point? _subtaskDragStartPoint;
+    private TaskItemViewModel? _subtaskDragSource;
+    private bool _suppressSubtaskClick;
+    private bool _suppressCompleteClick;
+    private bool _subtaskDragStartedSinceMouseDown;
+    private DateTime _suppressSubtaskClickUntilUtc = DateTime.MinValue;
+    private IReadOnlyList<long>? _subtaskDragOriginalOrder;
+    private FrameworkElement? _subtaskDragRow;
+    private double _subtaskDragRowOpacity;
+    private TaskDragAdorner? _subtaskDragAdorner;
+    private AdornerLayer? _subtaskDragAdornerLayer;
+    private Point _subtaskDragOffset;
+    private bool _isSubtaskDragging;
+    private bool _hasSubtaskDragPreview;
+    private bool _isFinishingSubtaskDrag;
+    private long? _lastSubtaskDragTargetId;
+    private bool _lastSubtaskDragInsertAfter;
+    private Point? _topTabDragStartPoint;
+    private ToggleButton? _topTabDragSource;
+    private double _topTabDragSourceOpacity;
+    private TaskDragAdorner? _topTabDragAdorner;
+    private AdornerLayer? _topTabDragAdornerLayer;
+    private Point _topTabDragOffset;
+    private bool _isTopTabDragging;
+    private bool _isFinishingTopTabDrag;
+    private bool _suppressTopTabClick;
+    private bool _isTopTabDragPending;
+    private IReadOnlyList<string>? _topTabDragOriginalOrder;
+    private bool _hasTopTabDragPreview;
+    private string? _lastTopTabDragTargetKey;
+    private bool _lastTopTabDragInsertAfter;
 
     private enum CalendarPickerMode { Day, Month, Year }
 
@@ -38,6 +86,7 @@ public partial class MainWindow : Window
     private readonly SettingsService _settings = App.Settings;
     private readonly DispatcherTimer _saveDebounce;
     private readonly DispatcherTimer _autoHideTimer;
+    private DispatcherTimer? _subtaskEditResetTimer;
     private bool _isHidden;
     private bool _isAnimating;
     // 顶部贴边：贴边后露出 2px 当作"勾住"的边沿；TriggerSize 略大让指针更容易唤醒
@@ -49,6 +98,10 @@ public partial class MainWindow : Window
         InitializeComponent();
         _vm = new MainViewModel(_settings);
         DataContext = _vm;
+        AddHandler(
+            UIElement.PreviewMouseDownEvent,
+            new MouseButtonEventHandler(TopTab_PreviewMouseDown),
+            true);
 
         _saveDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
         _saveDebounce.Tick += (_, _) => { _saveDebounce.Stop(); SaveBounds(); };
@@ -73,6 +126,7 @@ public partial class MainWindow : Window
             RestoreWindowBounds();
             _autoHideTimer.Start();
             HookCategoryOverflowPanel();
+            ApplySavedTopTabOrder();
             ApplyResponsiveTopBar();
         };
     }
@@ -120,6 +174,7 @@ public partial class MainWindow : Window
         // 搜索模式下：点击输入卡之外任何地方都退出搜索
         // 例外：标题栏的 🔍 按钮自身（它的 Click 会自己 toggle）
         if (_vm.IsSearchMode
+            && !_vm.IsSearchOnlyView
             && !IsInside(src, NewTaskRow)
             && (SearchButton == null || !IsInside(src, SearchButton)))
         {
@@ -297,9 +352,13 @@ public partial class MainWindow : Window
                 {
                     _vm.QuickInput = string.Empty;
                 }
-                else
+                else if (!_vm.IsSearchOnlyView)
                 {
                     _vm.IsSearchMode = false;
+                }
+                else
+                {
+                    Keyboard.ClearFocus();
                 }
             }
             else
@@ -313,6 +372,13 @@ public partial class MainWindow : Window
 
     private void QuickAddButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_vm.IsSearchOnlyView)
+        {
+            NewTaskBox.Focus();
+            e.Handled = true;
+            return;
+        }
+
         SubmitQuickAddOrFocus();
         e.Handled = true;
     }
@@ -326,6 +392,12 @@ public partial class MainWindow : Window
 
     private void SubmitQuickAddOrFocus()
     {
+        if (_vm.IsSearchOnlyView)
+        {
+            NewTaskBox.Focus();
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(_vm.QuickInput))
         {
             NewTaskBox.Focus();
@@ -1382,11 +1454,15 @@ public partial class MainWindow : Window
             _vm.QuickInput = string.Empty; // OnQuickInputChanged 会同步 SearchText
             NewTaskBox.Focus();
         }
-        else
+        else if (!_vm.IsSearchOnlyView)
         {
             _vm.IsSearchMode = false;
             Dispatcher.BeginInvoke(new Action(() => NewTaskBox.Focus()),
                 System.Windows.Threading.DispatcherPriority.Input);
+        }
+        else
+        {
+            NewTaskBox.Focus();
         }
     }
 
@@ -1394,6 +1470,14 @@ public partial class MainWindow : Window
     {
         if (sender is CheckBox cb && cb.DataContext is TaskItemViewModel vm)
         {
+            if (vm.Model.ParentId is not null
+                && (_suppressCompleteClick || DateTime.UtcNow < _suppressSubtaskClickUntilUtc))
+            {
+                _suppressCompleteClick = false;
+                e.Handled = true;
+                return;
+            }
+
             // 缩放脉冲做视觉反馈：1 → 1.25 → 1，~160ms
             var scale = new ScaleTransform(1, 1);
             cb.RenderTransform = scale;
@@ -1409,24 +1493,1156 @@ public partial class MainWindow : Window
             scale.BeginAnimation(ScaleTransform.ScaleXProperty, anim);
             scale.BeginAnimation(ScaleTransform.ScaleYProperty, anim);
 
+            var shouldMoveCompletedSubtask = vm.Model.ParentId is not null && !vm.Completed;
+            var previousSubtaskBounds = shouldMoveCompletedSubtask ? CaptureSubtaskRowBounds() : null;
+
             _vm.ToggleCompleteCommand.Execute(vm);
+
+            if (shouldMoveCompletedSubtask && previousSubtaskBounds is not null)
+            {
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (!_vm.MoveCompletedSubtaskToTail(vm)) return;
+
+                    UpdateLayout();
+                    AnimateSubtaskRowsFrom(previousSubtaskBounds);
+                }), DispatcherPriority.ContextIdle);
+            }
         }
+    }
+
+    private void TopTab_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        ClearTopTabPendingDrag();
+        _topTabDragStartPoint = null;
+        _topTabDragSource = null;
+
+        if (e.ChangedButton != MouseButton.Left) return;
+
+        if (FindTopTabFromSource(e.OriginalSource as DependencyObject) is not { } tab) return;
+        _topTabDragStartPoint = e.GetPosition(this);
+        _topTabDragSource = tab;
+        _isTopTabDragPending = true;
+        AddHandler(UIElement.PreviewMouseMoveEvent, new MouseEventHandler(TopTabPending_PreviewMouseMove), true);
+        AddHandler(UIElement.PreviewMouseUpEvent, new MouseButtonEventHandler(TopTabPending_PreviewMouseUp), true);
+    }
+
+    private void TopTabPending_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_isTopTabDragPending) return;
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            ClearTopTabPendingDrag();
+            return;
+        }
+
+        if (_topTabDragStartPoint is not { } start || _topTabDragSource is null) return;
+
+        var current = e.GetPosition(this);
+        var movedEnough =
+            Math.Abs(current.X - start.X) >= SystemParameters.MinimumHorizontalDragDistance
+            || Math.Abs(current.Y - start.Y) >= SystemParameters.MinimumVerticalDragDistance;
+        if (!movedEnough) return;
+
+        var source = _topTabDragSource;
+        ClearTopTabPendingDrag(keepSource: true);
+        BeginTopTabDrag(source, e.GetPosition(RootGrid));
+        e.Handled = true;
+    }
+
+    private void TopTabPending_PreviewMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left) return;
+        ClearTopTabPendingDrag();
+    }
+
+    private void ClearTopTabPendingDrag(bool keepSource = false)
+    {
+        if (_isTopTabDragPending)
+        {
+            RemoveHandler(UIElement.PreviewMouseMoveEvent, new MouseEventHandler(TopTabPending_PreviewMouseMove));
+            RemoveHandler(UIElement.PreviewMouseUpEvent, new MouseButtonEventHandler(TopTabPending_PreviewMouseUp));
+        }
+
+        _isTopTabDragPending = false;
+        _topTabDragStartPoint = null;
+        if (!keepSource)
+        {
+            _topTabDragSource = null;
+        }
+    }
+
+    private void TopTab_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_suppressTopTabClick) return;
+
+        _suppressTopTabClick = false;
+        e.Handled = true;
+    }
+
+    private void SuppressNextTopTabClick()
+    {
+        _suppressTopTabClick = true;
+        Dispatcher.BeginInvoke(new Action(() => _suppressTopTabClick = false), DispatcherPriority.ContextIdle);
+    }
+
+    private void BeginTopTabDrag(ToggleButton tab, Point rootPoint)
+    {
+        if (_isTopTabDragging) return;
+
+        _isTopTabDragging = true;
+        _topTabDragOriginalOrder = SnapshotTopTabOrder();
+        _hasTopTabDragPreview = false;
+        _lastTopTabDragTargetKey = null;
+        _lastTopTabDragInsertAfter = false;
+        _topTabDragSource = tab;
+        _topTabDragSourceOpacity = tab.Opacity;
+
+        var tabTopLeft = tab.TranslatePoint(new Point(0, 0), RootGrid);
+        _topTabDragOffset = new Point(rootPoint.X - tabTopLeft.X, rootPoint.Y - tabTopLeft.Y);
+
+        var snapshot = RenderElementSnapshot(tab);
+        _topTabDragAdornerLayer = AdornerLayer.GetAdornerLayer(RootGrid);
+        if (snapshot is not null && _topTabDragAdornerLayer is not null)
+        {
+            _topTabDragAdorner = new TaskDragAdorner(RootGrid, snapshot, tab.ActualWidth, tab.ActualHeight);
+            _topTabDragAdornerLayer.Add(_topTabDragAdorner);
+        }
+
+        tab.Opacity = 0.24;
+        Cursor = Cursors.SizeAll;
+
+        AddHandler(UIElement.PreviewMouseMoveEvent, new MouseEventHandler(TopTabDragWindow_PreviewMouseMove), true);
+        AddHandler(UIElement.PreviewMouseUpEvent, new MouseButtonEventHandler(TopTabDragWindow_PreviewMouseUp), true);
+        CaptureMouse();
+        LostMouseCapture += TopTabDragWindow_LostMouseCapture;
+
+        UpdateTopTabDrag(rootPoint);
+    }
+
+    private void TopTabDragWindow_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_isTopTabDragging) return;
+        UpdateTopTabDrag(e.GetPosition(RootGrid));
+        e.Handled = true;
+    }
+
+    private void TopTabDragWindow_PreviewMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left) return;
+        if (!_isTopTabDragging) return;
+        FinishTopTabDrag(commit: true);
+        SuppressNextTopTabClick();
+        e.Handled = true;
+    }
+
+    private void TopTabDragWindow_LostMouseCapture(object sender, MouseEventArgs e)
+    {
+        if (Mouse.Captured == this) return;
+        if (_isFinishingTopTabDrag || !_isTopTabDragging) return;
+        FinishTopTabDrag(commit: false);
+    }
+
+    private void UpdateTopTabDrag(Point rootPoint)
+    {
+        _topTabDragAdorner?.SetLocation(new Point(
+            rootPoint.X - _topTabDragOffset.X,
+            rootPoint.Y - _topTabDragOffset.Y));
+
+        if (TryResolveTopTabPreviewTarget(rootPoint, out var target, out var insertAfter)
+            && (_lastTopTabDragTargetKey != GetTopTabKey(target) || _lastTopTabDragInsertAfter != insertAfter))
+        {
+            if (MoveTopTabWithAnimation(target, insertAfter))
+            {
+                _lastTopTabDragTargetKey = GetTopTabKey(target);
+                _lastTopTabDragInsertAfter = insertAfter;
+            }
+        }
+    }
+
+    private bool TryResolveTopTabPreviewTarget(Point rootPoint, out ToggleButton target, out bool insertAfter)
+    {
+        target = null!;
+        insertAfter = false;
+        if (_topTabDragSource is null) return false;
+
+        var candidates = TopTabGrid.Children
+            .OfType<ToggleButton>()
+            .Where(tab => !ReferenceEquals(tab, _topTabDragSource))
+            .Select(tab => new
+            {
+                Tab = tab,
+                TopLeft = tab.TranslatePoint(new Point(0, 0), RootGrid)
+            })
+            .OrderBy(x => x.TopLeft.X)
+            .ToList();
+
+        if (candidates.Count == 0) return false;
+
+        foreach (var candidate in candidates)
+        {
+            var midpoint = candidate.TopLeft.X + candidate.Tab.ActualWidth / 2;
+            if (rootPoint.X < midpoint)
+            {
+                target = candidate.Tab;
+                insertAfter = false;
+                return true;
+            }
+        }
+
+        target = candidates[^1].Tab;
+        insertAfter = true;
+        return true;
+    }
+
+    private bool MoveTopTabWithAnimation(ToggleButton target, bool insertAfter)
+    {
+        if (_topTabDragSource is null || ReferenceEquals(_topTabDragSource, target)) return false;
+
+        var previousBounds = CaptureTopTabBounds();
+        var children = TopTabGrid.Children;
+        var oldIndex = children.IndexOf(_topTabDragSource);
+        var targetIndex = children.IndexOf(target);
+        if (oldIndex < 0 || targetIndex < 0) return false;
+
+        var targetIndexAfterRemoval = oldIndex < targetIndex ? targetIndex - 1 : targetIndex;
+        var newIndex = insertAfter ? targetIndexAfterRemoval + 1 : targetIndexAfterRemoval;
+        if (newIndex == oldIndex) return false;
+
+        children.RemoveAt(oldIndex);
+        children.Insert(Math.Clamp(newIndex, 0, children.Count), _topTabDragSource);
+        _hasTopTabDragPreview = true;
+        UpdateLayout();
+        ApplyTopTabPlaceholderOpacity();
+        AnimateTopTabsFrom(previousBounds);
+        return true;
+    }
+
+    private Dictionary<string, Rect> CaptureTopTabBounds()
+    {
+        return TopTabGrid.Children
+            .OfType<ToggleButton>()
+            .Where(tab => GetTopTabKey(tab) is not null)
+            .ToDictionary(
+                tab => GetTopTabKey(tab)!,
+                tab =>
+                {
+                    var topLeft = tab.TranslatePoint(new Point(0, 0), RootGrid);
+                    return new Rect(topLeft, new Size(tab.ActualWidth, tab.ActualHeight));
+                });
+    }
+
+    private void AnimateTopTabsFrom(IReadOnlyDictionary<string, Rect> previousBounds)
+    {
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var duration = TimeSpan.FromMilliseconds(180);
+
+        foreach (var tab in TopTabGrid.Children.OfType<ToggleButton>())
+        {
+            var key = GetTopTabKey(tab);
+            if (key is null || !previousBounds.TryGetValue(key, out var previous)) continue;
+
+            var currentTopLeft = tab.TranslatePoint(new Point(0, 0), RootGrid);
+            var offsetX = previous.Left - currentTopLeft.X;
+            var offsetY = previous.Top - currentTopLeft.Y;
+            if (Math.Abs(offsetX) < 0.5 && Math.Abs(offsetY) < 0.5) continue;
+
+            var transform = tab.RenderTransform as TranslateTransform;
+            if (transform is null)
+            {
+                transform = new TranslateTransform();
+                tab.RenderTransform = transform;
+            }
+
+            transform.BeginAnimation(TranslateTransform.XProperty, null);
+            transform.BeginAnimation(TranslateTransform.YProperty, null);
+            transform.X = offsetX;
+            transform.Y = offsetY;
+
+            transform.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(0, duration) { EasingFunction = ease });
+            transform.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(0, duration) { EasingFunction = ease });
+        }
+    }
+
+    private void FinishTopTabDrag(bool commit)
+    {
+        if (!_isTopTabDragging) return;
+
+        _isFinishingTopTabDrag = true;
+        RemoveHandler(UIElement.PreviewMouseMoveEvent, new MouseEventHandler(TopTabDragWindow_PreviewMouseMove));
+        RemoveHandler(UIElement.PreviewMouseUpEvent, new MouseButtonEventHandler(TopTabDragWindow_PreviewMouseUp));
+        LostMouseCapture -= TopTabDragWindow_LostMouseCapture;
+
+        if (Mouse.Captured == this)
+        {
+            ReleaseMouseCapture();
+        }
+
+        if (commit)
+        {
+            SaveTopTabOrder();
+        }
+        else if (_hasTopTabDragPreview)
+        {
+            RestoreTopTabOrderWithAnimation(_topTabDragOriginalOrder);
+        }
+
+        RestoreTopTabPlaceholderOpacity();
+
+        if (_topTabDragAdorner is not null)
+        {
+            _topTabDragAdornerLayer?.Remove(_topTabDragAdorner);
+        }
+
+        Cursor = null;
+        _topTabDragStartPoint = null;
+        _topTabDragSource = null;
+        _topTabDragOriginalOrder = null;
+        _topTabDragAdorner = null;
+        _topTabDragAdornerLayer = null;
+        _isTopTabDragging = false;
+        _lastTopTabDragTargetKey = null;
+        _lastTopTabDragInsertAfter = false;
+        _hasTopTabDragPreview = false;
+        _isFinishingTopTabDrag = false;
+    }
+
+    private void ApplyTopTabPlaceholderOpacity()
+    {
+        if (_topTabDragSource is not null)
+        {
+            _topTabDragSource.Opacity = 0.24;
+        }
+    }
+
+    private void RestoreTopTabPlaceholderOpacity()
+    {
+        if (_topTabDragSource is not null)
+        {
+            _topTabDragSource.Opacity = _topTabDragSourceOpacity;
+        }
+    }
+
+    private void SaveTopTabOrder()
+    {
+        _settings.TopTabOrder = string.Join(",", SnapshotTopTabOrder());
+    }
+
+    private IReadOnlyList<string> SnapshotTopTabOrder()
+    {
+        return TopTabGrid.Children
+            .OfType<ToggleButton>()
+            .Select(GetTopTabKey)
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Select(key => key!)
+            .ToList();
+    }
+
+    private void RestoreTopTabOrderWithAnimation(IReadOnlyList<string>? order)
+    {
+        if (order is null || order.Count == 0) return;
+
+        var previousBounds = CaptureTopTabBounds();
+        if (!ApplyTopTabOrder(order))
+        {
+            return;
+        }
+
+        UpdateLayout();
+        ApplyTopTabPlaceholderOpacity();
+        AnimateTopTabsFrom(previousBounds);
+    }
+
+    private void ApplySavedTopTabOrder()
+    {
+        var order = (_settings.TopTabOrder ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (order.Length == 0) return;
+
+        ApplyTopTabOrder(order);
+    }
+
+    private bool ApplyTopTabOrder(IReadOnlyList<string> order)
+    {
+        var tabs = TopTabGrid.Children
+            .OfType<ToggleButton>()
+            .Where(tab => GetTopTabKey(tab) is not null)
+            .ToDictionary(tab => GetTopTabKey(tab)!, tab => tab);
+
+        var orderedTabs = order
+            .Where(tabs.ContainsKey)
+            .Select(key => tabs[key])
+            .Concat(tabs.Where(pair => !order.Contains(pair.Key)).Select(pair => pair.Value))
+            .ToList();
+
+        if (orderedTabs.Count != tabs.Count) return false;
+        if (TopTabGrid.Children.OfType<ToggleButton>().SequenceEqual(orderedTabs)) return false;
+
+        TopTabGrid.Children.Clear();
+        foreach (var tab in orderedTabs)
+        {
+            TopTabGrid.Children.Add(tab);
+        }
+
+        return true;
+    }
+
+    private static string? GetTopTabKey(ToggleButton tab) => tab.Tag as string;
+
+    private static ToggleButton? FindTopTabFromSource(DependencyObject? d)
+    {
+        while (d != null)
+        {
+            if (d is ToggleButton tab && GetTopTabKey(tab) is not null)
+            {
+                return tab;
+            }
+
+            d = VisualTreeHelper.GetParent(d);
+        }
+
+        return null;
     }
 
     private void TaskRow_LeftClick(object sender, MouseButtonEventArgs e)
     {
+        if (_suppressTaskRowClick)
+        {
+            _suppressTaskRowClick = false;
+            e.Handled = true;
+            return;
+        }
+
         if (e.ClickCount > 1)
         {
             e.Handled = true;
             return;
         }
 
+        if (IsInsideElementNamed(e.OriginalSource as DependencyObject, "SubRow")) return;
         if (IsInteractiveElement(e.OriginalSource as DependencyObject)) return;
         if (sender is not FrameworkElement fe) return;
         if (fe.Tag is not TaskItemViewModel vm) return;
 
         _vm.ToggleExpandedCommand.Execute(vm);
         e.Handled = true;
+    }
+
+    private void TaskRow_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _taskDragStartPoint = null;
+        _taskDragSource = null;
+
+        if (!_vm.CanReorderTasks) return;
+        if (IsInsideElementNamed(e.OriginalSource as DependencyObject, "SubRow")) return;
+        if (IsInteractiveElement(e.OriginalSource as DependencyObject)) return;
+        if (sender is not FrameworkElement fe || fe.Tag is not TaskItemViewModel vm) return;
+
+        _taskDragStartPoint = e.GetPosition(this);
+        _taskDragSource = vm;
+    }
+
+    private void TaskRow_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_isTaskDragging)
+        {
+            UpdateTaskDrag(e.GetPosition(RootGrid));
+            e.Handled = true;
+            return;
+        }
+
+        if (e.LeftButton != MouseButtonState.Pressed) return;
+        if (_taskDragStartPoint is not { } start || _taskDragSource is null) return;
+        if (sender is not FrameworkElement row) return;
+
+        var current = e.GetPosition(this);
+        var movedEnough =
+            Math.Abs(current.X - start.X) >= SystemParameters.MinimumHorizontalDragDistance
+            || Math.Abs(current.Y - start.Y) >= SystemParameters.MinimumVerticalDragDistance;
+        if (!movedEnough) return;
+
+        BeginTaskDrag(row, e.GetPosition(RootGrid));
+        e.Handled = true;
+    }
+
+    private void BeginTaskDrag(FrameworkElement row, Point rootPoint)
+    {
+        if (_taskDragSource is null || _isTaskDragging) return;
+
+        _isTaskDragging = true;
+        _taskDragOriginalOrder = _vm.SnapshotVisibleTaskOrder();
+        _hasTaskDragPreview = false;
+        _lastTaskDragTargetId = null;
+        _lastTaskDragInsertAfter = false;
+
+        var dragElement = ResolveTaskDragElement(row);
+        _taskDragRow = dragElement;
+        _taskDragRowOpacity = dragElement.Opacity;
+        var rowTopLeft = dragElement.TranslatePoint(new Point(0, 0), RootGrid);
+        _taskDragOffset = new Point(rootPoint.X - rowTopLeft.X, rootPoint.Y - rowTopLeft.Y);
+
+        var snapshot = RenderElementSnapshot(dragElement);
+        _taskDragAdornerLayer = AdornerLayer.GetAdornerLayer(RootGrid);
+        if (snapshot is not null && _taskDragAdornerLayer is not null)
+        {
+            _taskDragAdorner = new TaskDragAdorner(RootGrid, snapshot, dragElement.ActualWidth, dragElement.ActualHeight);
+            _taskDragAdornerLayer.Add(_taskDragAdorner);
+        }
+
+        dragElement.Opacity = 0.18;
+        Cursor = Cursors.SizeAll;
+
+        PreviewMouseMove += TaskDragWindow_PreviewMouseMove;
+        PreviewMouseLeftButtonUp += TaskDragWindow_PreviewMouseLeftButtonUp;
+        LostMouseCapture += TaskDragWindow_LostMouseCapture;
+        CaptureMouse();
+
+        UpdateTaskDrag(rootPoint);
+    }
+
+    private FrameworkElement ResolveTaskDragElement(FrameworkElement row)
+    {
+        return FindElementNamed(row, "TaskCard") ?? row;
+    }
+
+    private static ImageSource? RenderElementSnapshot(FrameworkElement row)
+    {
+        if (row.ActualWidth <= 0 || row.ActualHeight <= 0) return null;
+
+        var dpi = VisualTreeHelper.GetDpi(row);
+        var pixelWidth = Math.Max(1, (int)Math.Ceiling(row.ActualWidth * dpi.DpiScaleX));
+        var pixelHeight = Math.Max(1, (int)Math.Ceiling(row.ActualHeight * dpi.DpiScaleY));
+        var bitmap = new RenderTargetBitmap(
+            pixelWidth,
+            pixelHeight,
+            96 * dpi.DpiScaleX,
+            96 * dpi.DpiScaleY,
+            PixelFormats.Pbgra32);
+        bitmap.Render(row);
+        bitmap.Freeze();
+        return bitmap;
+    }
+
+    private void TaskDragWindow_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_isTaskDragging) return;
+        UpdateTaskDrag(e.GetPosition(RootGrid));
+        e.Handled = true;
+    }
+
+    private void TaskDragWindow_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_isTaskDragging) return;
+        FinishTaskDrag(commit: true);
+        _suppressTaskRowClick = true;
+        e.Handled = true;
+    }
+
+    private void TaskDragWindow_LostMouseCapture(object sender, MouseEventArgs e)
+    {
+        if (_isFinishingTaskDrag || !_isTaskDragging) return;
+        FinishTaskDrag(commit: false);
+    }
+
+    private void UpdateTaskDrag(Point rootPoint)
+    {
+        _taskDragAdorner?.SetLocation(new Point(
+            rootPoint.X - _taskDragOffset.X,
+            rootPoint.Y - _taskDragOffset.Y));
+
+        if (TryResolveTaskPreviewTarget(rootPoint, out var target, out var insertAfter)
+            && _taskDragSource is { } source
+            && (_lastTaskDragTargetId != target.Model.Id || _lastTaskDragInsertAfter != insertAfter))
+        {
+            if (MoveTaskWithAnimation(source, target, insertAfter, persist: false))
+            {
+                _hasTaskDragPreview = true;
+                _lastTaskDragTargetId = target.Model.Id;
+                _lastTaskDragInsertAfter = insertAfter;
+            }
+        }
+    }
+
+    private bool TryResolveTaskPreviewTarget(Point rootPoint, out TaskItemViewModel target, out bool insertAfter)
+    {
+        target = null!;
+        insertAfter = false;
+
+        if (_taskDragSource is null) return false;
+
+        var candidates = FindTaskCards()
+            .Select(card => new
+            {
+                Card = card,
+                Vm = (TaskItemViewModel)card.Tag,
+                TopLeft = card.TranslatePoint(new Point(0, 0), RootGrid)
+            })
+            .Where(x => !ReferenceEquals(x.Vm, _taskDragSource) && _vm.CanMoveTask(_taskDragSource, x.Vm))
+            .OrderBy(x => x.TopLeft.Y)
+            .ToList();
+
+        if (candidates.Count == 0) return false;
+
+        foreach (var candidate in candidates)
+        {
+            var midpoint = candidate.TopLeft.Y + candidate.Card.ActualHeight / 2;
+            if (rootPoint.Y < midpoint)
+            {
+                target = candidate.Vm;
+                insertAfter = false;
+                return true;
+            }
+        }
+
+        target = candidates[^1].Vm;
+        insertAfter = true;
+        return true;
+    }
+
+    private void FinishTaskDrag(bool commit)
+    {
+        if (!_isTaskDragging) return;
+
+        _isFinishingTaskDrag = true;
+        PreviewMouseMove -= TaskDragWindow_PreviewMouseMove;
+        PreviewMouseLeftButtonUp -= TaskDragWindow_PreviewMouseLeftButtonUp;
+        LostMouseCapture -= TaskDragWindow_LostMouseCapture;
+
+        if (Mouse.Captured == this)
+        {
+            ReleaseMouseCapture();
+        }
+
+        if (commit)
+        {
+            _vm.PersistOrderForTask(_taskDragSource);
+        }
+        else if (_hasTaskDragPreview)
+        {
+            RestoreTaskOrderWithAnimation(_taskDragOriginalOrder);
+        }
+
+        RestoreTaskDragRowOpacity();
+
+        if (_taskDragAdorner is not null)
+        {
+            _taskDragAdornerLayer?.Remove(_taskDragAdorner);
+        }
+
+        Cursor = null;
+        _taskDragStartPoint = null;
+        _taskDragSource = null;
+        _taskDragOriginalOrder = null;
+        _taskDragRow = null;
+        _taskDragAdorner = null;
+        _taskDragAdornerLayer = null;
+        _isTaskDragging = false;
+        _hasTaskDragPreview = false;
+        _lastTaskDragTargetId = null;
+        _lastTaskDragInsertAfter = false;
+        _isFinishingTaskDrag = false;
+    }
+
+    private void ApplyTaskDragPlaceholderOpacity()
+    {
+        if (_taskDragSource is null) return;
+
+        foreach (var row in FindTaskCards()
+                     .Where(card => card.Tag is TaskItemViewModel vm
+                                    && vm.Model.Id == _taskDragSource.Model.Id))
+        {
+            row.Opacity = 0.18;
+        }
+    }
+
+    private void RestoreTaskDragRowOpacity()
+    {
+        if (_taskDragSource is not null)
+        {
+            foreach (var row in FindTaskCards()
+                         .Where(card => card.Tag is TaskItemViewModel vm
+                                        && vm.Model.Id == _taskDragSource.Model.Id))
+            {
+                row.Opacity = _taskDragRowOpacity;
+            }
+        }
+
+        if (_taskDragRow is not null)
+        {
+            _taskDragRow.Opacity = _taskDragRowOpacity;
+        }
+    }
+
+    private bool MoveTaskWithAnimation(TaskItemViewModel source, TaskItemViewModel? target, bool insertAfter, bool persist)
+    {
+        var previousBounds = CaptureTaskRowBounds();
+        var moved = persist
+            ? _vm.MoveTask(source, target, insertAfter)
+            : _vm.PreviewMoveTask(source, target, insertAfter);
+        if (!moved)
+        {
+            return false;
+        }
+
+        UpdateLayout();
+        if (_isTaskDragging)
+        {
+            ApplyTaskDragPlaceholderOpacity();
+        }
+        AnimateTaskRowsFrom(previousBounds);
+        return true;
+    }
+
+    private void RestoreTaskOrderWithAnimation(IReadOnlyList<long>? originalOrder)
+    {
+        var previousBounds = CaptureTaskRowBounds();
+        if (!_vm.RestoreVisibleTaskOrder(originalOrder))
+        {
+            return;
+        }
+
+        UpdateLayout();
+        if (_isTaskDragging)
+        {
+            ApplyTaskDragPlaceholderOpacity();
+        }
+        AnimateTaskRowsFrom(previousBounds);
+    }
+
+    private Dictionary<long, Rect> CaptureTaskRowBounds()
+    {
+        var bounds = new Dictionary<long, Rect>();
+        foreach (var row in FindTaskCards())
+        {
+            if (row.Tag is not TaskItemViewModel vm) continue;
+            var topLeft = row.TranslatePoint(new Point(0, 0), MainScroller);
+            bounds[vm.Model.Id] = new Rect(topLeft, new Size(row.ActualWidth, row.ActualHeight));
+        }
+
+        return bounds;
+    }
+
+    private IEnumerable<FrameworkElement> FindTaskCards()
+    {
+        return FindDescendants<StackPanel>(MainScroller)
+            .Where(panel => panel.Name == "TaskCard" && panel.Tag is TaskItemViewModel)
+            .Cast<FrameworkElement>();
+    }
+
+    private void AnimateTaskRowsFrom(IReadOnlyDictionary<long, Rect> previousBounds)
+    {
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var duration = TimeSpan.FromMilliseconds(180);
+
+        foreach (var row in FindTaskCards())
+        {
+            if (row.Tag is not TaskItemViewModel vm) continue;
+            if (!previousBounds.TryGetValue(vm.Model.Id, out var previous)) continue;
+
+            var currentTopLeft = row.TranslatePoint(new Point(0, 0), MainScroller);
+            var offsetX = previous.Left - currentTopLeft.X;
+            var offsetY = previous.Top - currentTopLeft.Y;
+            if (Math.Abs(offsetX) < 0.5 && Math.Abs(offsetY) < 0.5) continue;
+
+            var transform = row.RenderTransform as TranslateTransform;
+            if (transform is null)
+            {
+                transform = new TranslateTransform();
+                row.RenderTransform = transform;
+            }
+
+            transform.BeginAnimation(TranslateTransform.XProperty, null);
+            transform.BeginAnimation(TranslateTransform.YProperty, null);
+            transform.X = offsetX;
+            transform.Y = offsetY;
+
+            var xAnimation = new DoubleAnimation(0, duration)
+            {
+                EasingFunction = ease
+            };
+            var yAnimation = new DoubleAnimation(0, duration)
+            {
+                EasingFunction = ease
+            };
+
+            transform.BeginAnimation(TranslateTransform.XProperty, xAnimation);
+            transform.BeginAnimation(TranslateTransform.YProperty, yAnimation);
+        }
+    }
+
+    private void SubtaskRow_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _subtaskDragStartPoint = null;
+        _subtaskDragSource = null;
+        _subtaskDragStartedSinceMouseDown = false;
+
+        var originalSource = e.OriginalSource as DependencyObject;
+        if (IsInteractiveElement(originalSource) && !IsInsideCheckBox(originalSource)) return;
+        if (sender is not FrameworkElement row || row.Tag is not TaskItemViewModel vm) return;
+
+        _subtaskDragStartPoint = e.GetPosition(this);
+        _subtaskDragSource = vm;
+    }
+
+    private void SubtaskRow_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_isSubtaskDragging)
+        {
+            UpdateSubtaskDrag(e.GetPosition(RootGrid));
+            e.Handled = true;
+            return;
+        }
+
+        if (!_vm.CanReorderTasks) return;
+        if (e.LeftButton != MouseButtonState.Pressed) return;
+        if (_subtaskDragStartPoint is not { } start || _subtaskDragSource is null) return;
+        if (sender is not FrameworkElement row) return;
+
+        var current = e.GetPosition(this);
+        var movedEnough =
+            Math.Abs(current.X - start.X) >= SystemParameters.MinimumHorizontalDragDistance
+            || Math.Abs(current.Y - start.Y) >= SystemParameters.MinimumVerticalDragDistance;
+        if (!movedEnough) return;
+
+        BeginSubtaskDrag(row, e.GetPosition(RootGrid));
+        e.Handled = true;
+    }
+
+    private void SubtaskRow_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_isSubtaskDragging || _isFinishingSubtaskDrag || _subtaskDragStartedSinceMouseDown)
+        {
+            _subtaskDragStartedSinceMouseDown = false;
+            e.Handled = true;
+            return;
+        }
+
+        if (_suppressSubtaskClick || DateTime.UtcNow < _suppressSubtaskClickUntilUtc)
+        {
+            _suppressSubtaskClick = false;
+            e.Handled = true;
+            return;
+        }
+
+        if (IsInteractiveElement(e.OriginalSource as DependencyObject)) return;
+        if (sender is not FrameworkElement row || row.Tag is not TaskItemViewModel vm) return;
+
+        BeginInlineEdit(vm);
+        e.Handled = true;
+    }
+
+    private void BeginSubtaskDrag(FrameworkElement row, Point rootPoint)
+    {
+        if (_subtaskDragSource is null || _isSubtaskDragging || _isTaskDragging) return;
+
+        _isSubtaskDragging = true;
+        _subtaskDragStartedSinceMouseDown = true;
+        _subtaskDragOriginalOrder = _vm.SnapshotVisibleSubtaskOrder(_subtaskDragSource);
+        _hasSubtaskDragPreview = false;
+        _lastSubtaskDragTargetId = null;
+        _lastSubtaskDragInsertAfter = false;
+
+        _subtaskDragRow = row;
+        _subtaskDragRowOpacity = row.Opacity;
+        var rowTopLeft = row.TranslatePoint(new Point(0, 0), RootGrid);
+        _subtaskDragOffset = new Point(rootPoint.X - rowTopLeft.X, rootPoint.Y - rowTopLeft.Y);
+
+        var snapshot = RenderElementSnapshot(row);
+        _subtaskDragAdornerLayer = AdornerLayer.GetAdornerLayer(RootGrid);
+        if (snapshot is not null && _subtaskDragAdornerLayer is not null)
+        {
+            _subtaskDragAdorner = new TaskDragAdorner(RootGrid, snapshot, row.ActualWidth, row.ActualHeight);
+            _subtaskDragAdornerLayer.Add(_subtaskDragAdorner);
+        }
+
+        row.Opacity = 0.18;
+        Cursor = Cursors.SizeAll;
+
+        AddHandler(UIElement.PreviewMouseMoveEvent, new MouseEventHandler(SubtaskDragWindow_PreviewMouseMove), true);
+        AddHandler(UIElement.PreviewMouseUpEvent, new MouseButtonEventHandler(SubtaskDragWindow_PreviewMouseUp), true);
+        CaptureMouse();
+        LostMouseCapture += SubtaskDragWindow_LostMouseCapture;
+
+        UpdateSubtaskDrag(rootPoint);
+    }
+
+    private void SubtaskDragWindow_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_isSubtaskDragging) return;
+        UpdateSubtaskDrag(e.GetPosition(RootGrid));
+        e.Handled = true;
+    }
+
+    private void SubtaskDragWindow_PreviewMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left) return;
+        if (!_isSubtaskDragging) return;
+
+        var dragged = _subtaskDragSource;
+        var restoreOpacity = _subtaskDragRowOpacity;
+        FinishSubtaskDrag(commit: true);
+        SuppressNextSubtaskClick(dragged, restoreOpacity);
+        e.Handled = true;
+    }
+
+    private void SubtaskDragWindow_LostMouseCapture(object sender, MouseEventArgs e)
+    {
+        if (Mouse.Captured == this) return;
+        if (_isFinishingSubtaskDrag || !_isSubtaskDragging) return;
+        FinishSubtaskDrag(commit: false);
+    }
+
+    private void UpdateSubtaskDrag(Point rootPoint)
+    {
+        _subtaskDragAdorner?.SetLocation(new Point(
+            rootPoint.X - _subtaskDragOffset.X,
+            rootPoint.Y - _subtaskDragOffset.Y));
+
+        if (TryResolveSubtaskPreviewTarget(rootPoint, out var target, out var insertAfter)
+            && _subtaskDragSource is { } source
+            && (_lastSubtaskDragTargetId != target.Model.Id || _lastSubtaskDragInsertAfter != insertAfter))
+        {
+            if (MoveSubtaskWithAnimation(source, target, insertAfter))
+            {
+                _hasSubtaskDragPreview = true;
+                _lastSubtaskDragTargetId = target.Model.Id;
+                _lastSubtaskDragInsertAfter = insertAfter;
+            }
+        }
+    }
+
+    private bool TryResolveSubtaskPreviewTarget(Point rootPoint, out TaskItemViewModel target, out bool insertAfter)
+    {
+        target = null!;
+        insertAfter = false;
+        if (_subtaskDragSource is null) return false;
+
+        var candidates = FindDescendants<Border>(MainScroller)
+            .Where(b => b.Name == "SubRow" && b.Tag is TaskItemViewModel)
+            .Select(row => new
+            {
+                Row = row,
+                Vm = (TaskItemViewModel)row.Tag,
+                TopLeft = row.TranslatePoint(new Point(0, 0), RootGrid)
+            })
+            .Where(x => !ReferenceEquals(x.Vm, _subtaskDragSource) && _vm.CanMoveSubtask(_subtaskDragSource, x.Vm))
+            .OrderBy(x => x.TopLeft.Y)
+            .ToList();
+
+        if (candidates.Count == 0) return false;
+
+        foreach (var candidate in candidates)
+        {
+            var midpoint = candidate.TopLeft.Y + candidate.Row.ActualHeight / 2;
+            if (rootPoint.Y < midpoint)
+            {
+                target = candidate.Vm;
+                insertAfter = false;
+                return true;
+            }
+        }
+
+        target = candidates[^1].Vm;
+        insertAfter = true;
+        return true;
+    }
+
+    private void FinishSubtaskDrag(bool commit)
+    {
+        if (!_isSubtaskDragging) return;
+
+        _isFinishingSubtaskDrag = true;
+        RemoveHandler(UIElement.PreviewMouseMoveEvent, new MouseEventHandler(SubtaskDragWindow_PreviewMouseMove));
+        RemoveHandler(UIElement.PreviewMouseUpEvent, new MouseButtonEventHandler(SubtaskDragWindow_PreviewMouseUp));
+        LostMouseCapture -= SubtaskDragWindow_LostMouseCapture;
+
+        if (Mouse.Captured == this)
+        {
+            ReleaseMouseCapture();
+        }
+
+        if (commit)
+        {
+            _vm.PersistOrderForSubtask(_subtaskDragSource);
+        }
+        else if (_hasSubtaskDragPreview)
+        {
+            RestoreSubtaskOrderWithAnimation(_subtaskDragOriginalOrder);
+        }
+
+        RestoreSubtaskDragRowOpacity();
+
+        if (_subtaskDragAdorner is not null)
+        {
+            _subtaskDragAdornerLayer?.Remove(_subtaskDragAdorner);
+        }
+
+        Cursor = null;
+        _subtaskDragStartPoint = null;
+        _subtaskDragSource = null;
+        _subtaskDragOriginalOrder = null;
+        _subtaskDragRow = null;
+        _subtaskDragAdorner = null;
+        _subtaskDragAdornerLayer = null;
+        _isSubtaskDragging = false;
+        _hasSubtaskDragPreview = false;
+        _lastSubtaskDragTargetId = null;
+        _lastSubtaskDragInsertAfter = false;
+        _isFinishingSubtaskDrag = false;
+    }
+
+    private void ApplySubtaskDragPlaceholderOpacity()
+    {
+        if (_subtaskDragSource is null) return;
+
+        foreach (var row in FindDescendants<Border>(MainScroller)
+                     .Where(b => b.Name == "SubRow" && b.Tag is TaskItemViewModel vm
+                                 && vm.Model.Id == _subtaskDragSource.Model.Id))
+        {
+            row.Opacity = 0.18;
+        }
+    }
+
+    private void RestoreSubtaskDragRowOpacity()
+    {
+        if (_subtaskDragSource is not null)
+        {
+            foreach (var row in FindDescendants<Border>(MainScroller)
+                         .Where(b => b.Name == "SubRow" && b.Tag is TaskItemViewModel vm
+                                     && vm.Model.Id == _subtaskDragSource.Model.Id))
+            {
+                row.Opacity = _subtaskDragRowOpacity;
+            }
+        }
+
+        if (_subtaskDragRow is not null)
+        {
+            _subtaskDragRow.Opacity = _subtaskDragRowOpacity;
+        }
+    }
+
+    private bool MoveSubtaskWithAnimation(TaskItemViewModel source, TaskItemViewModel target, bool insertAfter)
+    {
+        var previousBounds = CaptureSubtaskRowBounds();
+        if (!_vm.PreviewMoveSubtask(source, target, insertAfter))
+        {
+            return false;
+        }
+
+        UpdateLayout();
+        if (_isSubtaskDragging)
+        {
+            ApplySubtaskDragPlaceholderOpacity();
+        }
+        AnimateSubtaskRowsFrom(previousBounds);
+        return true;
+    }
+
+    private void RestoreSubtaskOrderWithAnimation(IReadOnlyList<long>? originalOrder)
+    {
+        var previousBounds = CaptureSubtaskRowBounds();
+        if (!_vm.RestoreVisibleSubtaskOrder(_subtaskDragSource, originalOrder))
+        {
+            return;
+        }
+
+        UpdateLayout();
+        if (_isSubtaskDragging)
+        {
+            ApplySubtaskDragPlaceholderOpacity();
+        }
+        AnimateSubtaskRowsFrom(previousBounds);
+    }
+
+    private Dictionary<long, Rect> CaptureSubtaskRowBounds()
+    {
+        var bounds = new Dictionary<long, Rect>();
+        foreach (var row in FindDescendants<Border>(MainScroller)
+                     .Where(b => b.Name == "SubRow" && b.Tag is TaskItemViewModel))
+        {
+            if (row.Tag is not TaskItemViewModel vm) continue;
+            var topLeft = row.TranslatePoint(new Point(0, 0), MainScroller);
+            bounds[vm.Model.Id] = new Rect(topLeft, new Size(row.ActualWidth, row.ActualHeight));
+        }
+
+        return bounds;
+    }
+
+    private void AnimateSubtaskRowsFrom(IReadOnlyDictionary<long, Rect> previousBounds)
+    {
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var duration = TimeSpan.FromMilliseconds(180);
+
+        foreach (var row in FindDescendants<Border>(MainScroller)
+                     .Where(b => b.Name == "SubRow" && b.Tag is TaskItemViewModel))
+        {
+            if (row.Tag is not TaskItemViewModel vm) continue;
+            if (!previousBounds.TryGetValue(vm.Model.Id, out var previous)) continue;
+
+            var currentTopLeft = row.TranslatePoint(new Point(0, 0), MainScroller);
+            var offsetX = previous.Left - currentTopLeft.X;
+            var offsetY = previous.Top - currentTopLeft.Y;
+            if (Math.Abs(offsetX) < 0.5 && Math.Abs(offsetY) < 0.5) continue;
+
+            var transform = row.RenderTransform as TranslateTransform;
+            if (transform is null)
+            {
+                transform = new TranslateTransform();
+                row.RenderTransform = transform;
+            }
+
+            transform.BeginAnimation(TranslateTransform.XProperty, null);
+            transform.BeginAnimation(TranslateTransform.YProperty, null);
+            transform.X = offsetX;
+            transform.Y = offsetY;
+
+            transform.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(0, duration) { EasingFunction = ease });
+            transform.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(0, duration) { EasingFunction = ease });
+        }
+    }
+
+    private void SuppressNextSubtaskClick(TaskItemViewModel? dragged, double restoreOpacity)
+    {
+        _suppressSubtaskClick = true;
+        _suppressCompleteClick = true;
+        _suppressSubtaskClickUntilUtc = DateTime.UtcNow.AddMilliseconds(500);
+        if (dragged is not null)
+        {
+            dragged.IsInlineEditing = false;
+            RestoreSubtaskVisual(dragged, restoreOpacity);
+            _subtaskEditResetTimer?.Stop();
+            var resetCount = 0;
+            _subtaskEditResetTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
+            _subtaskEditResetTimer.Tick += (_, _) =>
+            {
+                dragged.IsInlineEditing = false;
+                RestoreSubtaskVisual(dragged, restoreOpacity);
+                resetCount++;
+                if (resetCount >= 5)
+                {
+                    _subtaskEditResetTimer?.Stop();
+                    _subtaskEditResetTimer = null;
+                }
+            };
+            _subtaskEditResetTimer.Start();
+        }
+
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            _suppressSubtaskClick = false;
+            _suppressCompleteClick = false;
+            _subtaskDragStartedSinceMouseDown = false;
+        }), DispatcherPriority.ContextIdle);
+    }
+
+    private void RestoreSubtaskVisual(TaskItemViewModel subtask, double restoreOpacity)
+    {
+        foreach (var row in FindDescendants<Border>(MainScroller)
+                     .Where(b => b.Name == "SubRow" && b.Tag is TaskItemViewModel vm
+                                 && vm.Model.Id == subtask.Model.Id))
+        {
+            row.Opacity = restoreOpacity;
+        }
     }
 
     private void CategoryFilterScrollViewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
@@ -1446,6 +2662,58 @@ public partial class MainWindow : Window
             btn.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
             btn.ContextMenu.IsOpen = true;
         }
+    }
+
+    private async void MenuCheckUpdates_Click(object sender, RoutedEventArgs e)
+    {
+        var menuItem = sender as MenuItem;
+        var previousHeader = menuItem?.Header;
+        if (menuItem is not null)
+        {
+            menuItem.IsEnabled = false;
+            menuItem.Header = "正在检查…";
+        }
+
+        try
+        {
+            var result = await new UpdateService().CheckLatestAsync();
+            switch (result.Status)
+            {
+                case UpdateCheckStatus.UpdateAvailable:
+                    var message = $"发现新版本 {result.LatestVersion}\n当前版本 {result.CurrentVersion}\n\n是否打开下载页面？";
+                    if (MessageBox.Show(this, message, "检查更新", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes
+                        && !string.IsNullOrWhiteSpace(result.ReleaseUrl))
+                    {
+                        OpenExternalUrl(result.ReleaseUrl);
+                    }
+                    break;
+
+                case UpdateCheckStatus.UpToDate:
+                    MessageBox.Show(this, $"当前已是最新版本。\n当前版本 {result.CurrentVersion}", "检查更新", MessageBoxButton.OK, MessageBoxImage.Information);
+                    break;
+
+                case UpdateCheckStatus.NoRelease:
+                    MessageBox.Show(this, "还没有可用的 GitHub Release。\n发布第一个 Release 后，这里就能检测到新版本。", "检查更新", MessageBoxButton.OK, MessageBoxImage.Information);
+                    break;
+
+                case UpdateCheckStatus.Failed:
+                    MessageBox.Show(this, $"检查更新失败：\n{result.ErrorMessage}", "检查更新", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    break;
+            }
+        }
+        finally
+        {
+            if (menuItem is not null)
+            {
+                menuItem.Header = previousHeader;
+                menuItem.IsEnabled = true;
+            }
+        }
+    }
+
+    private static void OpenExternalUrl(string url)
+    {
+        Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
     }
 
     private void MenuCategories_Click(object sender, RoutedEventArgs e)
@@ -1520,16 +2788,6 @@ public partial class MainWindow : Window
     private void TaskTitle_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ClickCount != 2) return;
-        if (sender is FrameworkElement el && el.DataContext is TaskItemViewModel vm)
-        {
-            BeginInlineEdit(vm);
-            e.Handled = true;
-        }
-    }
-
-    // —— 子任务标题点击进入编辑态 ——
-    private void SubtaskTitle_Click(object sender, MouseButtonEventArgs e)
-    {
         if (sender is FrameworkElement el && el.DataContext is TaskItemViewModel vm)
         {
             BeginInlineEdit(vm);
@@ -1678,6 +2936,27 @@ public partial class MainWindow : Window
 
     private void MainWindow_KeyDown(object sender, KeyEventArgs e)
     {
+        if (_isTopTabDragging && e.Key == Key.Escape)
+        {
+            FinishTopTabDrag(commit: false);
+            e.Handled = true;
+            return;
+        }
+
+        if (_isSubtaskDragging && e.Key == Key.Escape)
+        {
+            FinishSubtaskDrag(commit: false);
+            e.Handled = true;
+            return;
+        }
+
+        if (_isTaskDragging && e.Key == Key.Escape)
+        {
+            FinishTaskDrag(commit: false);
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.N && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
         {
             NewTaskBox.Focus();
@@ -1688,7 +2967,12 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
+        ClearTopTabPendingDrag();
+        FinishTopTabDrag(commit: false);
+        FinishSubtaskDrag(commit: false);
+        FinishTaskDrag(commit: false);
         SaveBounds();
+        _subtaskEditResetTimer?.Stop();
         _autoHideTimer.Stop();
     }
 
@@ -1724,6 +3008,41 @@ public partial class MainWindow : Window
         return false;
     }
 
+    private static bool IsInsideElementNamed(DependencyObject? d, string name)
+    {
+        return FindElementNamed(d, name) is not null;
+    }
+
+    private static FrameworkElement? FindElementNamed(DependencyObject? d, string name)
+    {
+        while (d != null)
+        {
+            if (d is FrameworkElement fe && fe.Name == name)
+            {
+                return fe;
+            }
+
+            d = VisualTreeHelper.GetParent(d);
+        }
+
+        return null;
+    }
+
+    private static bool IsInsideCheckBox(DependencyObject? d)
+    {
+        while (d != null)
+        {
+            if (d is CheckBox)
+            {
+                return true;
+            }
+
+            d = VisualTreeHelper.GetParent(d);
+        }
+
+        return false;
+    }
+
     private static bool IsInside(DependencyObject? d, DependencyObject ancestor)
     {
         while (d != null)
@@ -1737,21 +3056,22 @@ public partial class MainWindow : Window
 
     // ===== 顶栏自适应：窗口越窄，逐级折叠次要元素 =====
     // 阈值是按"刚好放得下下一档元素"反推的：
-    //   ≥ 420px 全显
-    //   < 420px 隐藏 tab 计数（"待办 6" → "待办"）
+    //   ≥ 500px 全显
+    //   < 500px 隐藏 tab 计数（"待办 6" → "待办"）
     //   < 360px 再隐藏搜索按钮（设置 / Min / Close 永远保留）
     private void ApplyResponsiveTopBar()
     {
         if (TodayCountText == null) return; // 尚未 InitializeComponent
 
         var w = ActualWidth;
-        var showCounts = w >= 420;
+        var showCounts = w >= 500;
         var showSearch = w >= 360;
 
         var countVis = showCounts ? Visibility.Visible : Visibility.Collapsed;
         TodayCountText.Visibility = countVis;
         UpcomingCountText.Visibility = countVis;
         InboxCountText.Visibility = countVis;
+        CompletedCountText.Visibility = countVis;
 
         if (SearchButton != null)
             SearchButton.Visibility = showSearch ? Visibility.Visible : Visibility.Collapsed;
@@ -1824,6 +3144,63 @@ public partial class MainWindow : Window
             if (deeper != null) return deeper;
         }
         return null;
+    }
+
+    private static IEnumerable<T> FindDescendants<T>(DependencyObject root) where T : DependencyObject
+    {
+        if (root == null) yield break;
+
+        var childCount = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < childCount; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T typed)
+            {
+                yield return typed;
+            }
+
+            foreach (var descendant in FindDescendants<T>(child))
+            {
+                yield return descendant;
+            }
+        }
+    }
+}
+
+internal sealed class TaskDragAdorner : Adorner
+{
+    private readonly ImageSource _image;
+    private readonly double _width;
+    private readonly double _height;
+    private Point _location;
+
+    public TaskDragAdorner(UIElement adornedElement, ImageSource image, double width, double height)
+        : base(adornedElement)
+    {
+        _image = image;
+        _width = width;
+        _height = height;
+        IsHitTestVisible = false;
+    }
+
+    public void SetLocation(Point location)
+    {
+        _location = location;
+        InvalidateVisual();
+    }
+
+    protected override void OnRender(DrawingContext drawingContext)
+    {
+        var rect = new Rect(_location, new Size(_width, _height));
+        var shadowRect = new Rect(_location.X, _location.Y + 4, _width, _height);
+
+        drawingContext.PushOpacity(0.16);
+        drawingContext.DrawRoundedRectangle(Brushes.Black, null, shadowRect, 12, 12);
+        drawingContext.Pop();
+
+        drawingContext.PushOpacity(0.94);
+        drawingContext.DrawImage(_image, rect);
+        drawingContext.Pop();
     }
 }
 

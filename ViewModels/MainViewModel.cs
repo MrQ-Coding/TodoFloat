@@ -14,7 +14,8 @@ public enum TodoView
 {
     Today,
     Upcoming,
-    Inbox
+    Inbox,
+    Completed
 }
 
 public partial class MainViewModel : ObservableObject
@@ -94,11 +95,18 @@ public partial class MainViewModel : ObservableObject
         set { if (value) CurrentView = TodoView.Inbox; }
     }
 
+    public bool IsCompletedView
+    {
+        get => CurrentView == TodoView.Completed;
+        set { if (value) CurrentView = TodoView.Completed; }
+    }
+
     public string ViewTitle => CurrentView switch
     {
         TodoView.Today => "待办",
         TodoView.Upcoming => "接下来",
-        TodoView.Inbox => ShowCompleted ? "全部任务" : "全部待办",
+        TodoView.Inbox => "全部待办",
+        TodoView.Completed => "已完成",
         _ => "任务"
     };
 
@@ -107,12 +115,22 @@ public partial class MainViewModel : ObservableObject
         TodoView.Today => "暂无待办",
         TodoView.Upcoming => "后续没有安排",
         TodoView.Inbox => "任务列表为空",
+        TodoView.Completed => "还没有已完成任务",
         _ => "没有任务"
     };
+
+    public string EmptySubtitle => CurrentView == TodoView.Completed
+        ? "完成后的任务会收在这里"
+        : "从上方添加一项任务开始记录";
 
     public bool HasTaskGroups => TaskGroups.Count > 0;
 
     public double CompletionPercent => TotalCount == 0 ? 0 : CompletedCount * 100.0 / TotalCount;
+
+    public bool CanReorderTasks => string.IsNullOrWhiteSpace(SearchText);
+    public bool IsSearchOnlyView => CurrentView == TodoView.Completed;
+
+    private bool _completedViewForcedSearch;
 
     // —— Quick add chip state（实际 chips，与文本解耦）——
     private bool _suppressExtract;
@@ -286,10 +304,6 @@ public partial class MainViewModel : ObservableObject
 
         var filtered = roots
             .Where(IsVisibleInCurrentView)
-            .OrderBy(t => t.Completed)
-            .ThenBy(t => t.DueAt ?? DateTime.MaxValue)
-            .ThenBy(t => t.SortOrder)
-            .ThenBy(t => t.Id)
             .ToList();
 
         var catLookup = Categories.ToDictionary(c => c.Id);
@@ -329,10 +343,13 @@ public partial class MainViewModel : ObservableObject
                 .ToList();
         }
 
-        if (!ShowCompleted)
+        var rootsById = allRoots.ToDictionary(t => t.Id);
+        matches = matches.Where(t =>
         {
-            matches = matches.Where(t => !t.Completed).ToList();
-        }
+            if (t.ParentId is null) return MatchesCurrentCompletionScope(t);
+            return rootsById.TryGetValue(t.ParentId.Value, out var root)
+                   && MatchesCurrentCompletionScope(root);
+        }).ToList();
 
         matchIds = matches.Select(t => t.Id).ToHashSet();
         var rootIds = matches
@@ -353,6 +370,7 @@ public partial class MainViewModel : ObservableObject
             TodoView.Today => BuildTodayGroups(filtered, catLookup, prevExpandedIds, searchMatchIds),
             TodoView.Upcoming => BuildUpcomingGroups(filtered, catLookup, prevExpandedIds, searchMatchIds),
             TodoView.Inbox => BuildInboxGroups(filtered, catLookup, prevExpandedIds, searchMatchIds),
+            TodoView.Completed => BuildCompletedGroups(filtered, catLookup, prevExpandedIds, searchMatchIds),
             _ => []
         };
     }
@@ -363,11 +381,12 @@ public partial class MainViewModel : ObservableObject
         HashSet<long>? prevExpandedIds,
         HashSet<long>? searchMatchIds)
     {
+        var ordered = SortByManual(filtered).ToList();
         var group = BuildGroup(
             "待办",
-            $"剩余 {filtered.Count(t => !t.Completed)} 项",
+            $"剩余 {ordered.Count} 项",
             true,
-            filtered,
+            ordered,
             catLookup,
             prevExpandedIds,
             searchMatchIds,
@@ -383,13 +402,13 @@ public partial class MainViewModel : ObservableObject
         HashSet<long>? searchMatchIds)
     {
         var today = DateTime.Today;
-        var tomorrow = filtered.Where(t => t.DueAt?.ToLocalTime().Date == today.AddDays(1)).ToList();
-        var week = filtered.Where(t =>
+        var tomorrow = SortByManual(filtered.Where(t => t.DueAt?.ToLocalTime().Date == today.AddDays(1))).ToList();
+        var week = SortByManual(filtered.Where(t =>
         {
             var due = t.DueAt?.ToLocalTime().Date;
             return due > today.AddDays(1) && due <= today.AddDays(7);
-        }).ToList();
-        var later = filtered.Where(t => t.DueAt?.ToLocalTime().Date > today.AddDays(7)).ToList();
+        })).ToList();
+        var later = SortByManual(filtered.Where(t => t.DueAt?.ToLocalTime().Date > today.AddDays(7))).ToList();
 
         var tomorrowGroup = BuildGroup("明天", DateTime.Today.AddDays(1).ToString("M月d日 ddd"), false, tomorrow, catLookup, prevExpandedIds, searchMatchIds);
         var weekGroup = BuildGroup("本周", "未来 7 天", false, week, catLookup, prevExpandedIds, searchMatchIds);
@@ -406,17 +425,52 @@ public partial class MainViewModel : ObservableObject
         HashSet<long>? prevExpandedIds,
         HashSet<long>? searchMatchIds)
     {
+        var ordered = SortByManual(filtered).ToList();
         var group = BuildGroup(
-            ShowCompleted ? "全部任务" : "全部待办",
-            $"{filtered.Count(t => !t.Completed)} 项任务",
+            "全部待办",
+            $"{ordered.Count} 项任务",
             false,
-            filtered,
+            ordered,
             catLookup,
             prevExpandedIds,
             searchMatchIds,
             showHeader: false);
 
         if (group is not null) yield return group;
+    }
+
+    private IEnumerable<TaskGroupViewModel> BuildCompletedGroups(
+        IReadOnlyList<TodoTask> filtered,
+        Dictionary<long, Category> catLookup,
+        HashSet<long>? prevExpandedIds,
+        HashSet<long>? searchMatchIds)
+    {
+        var today = DateTime.Today;
+        var yesterday = today.AddDays(-1);
+        var weekStart = today.AddDays(-7);
+
+        var todayTasks = SortByManual(filtered.Where(t => GetCompletedLocalDate(t) == today)).ToList();
+        var yesterdayTasks = SortByManual(filtered.Where(t => GetCompletedLocalDate(t) == yesterday)).ToList();
+        var weekTasks = SortByManual(filtered.Where(t =>
+        {
+            var completedDate = GetCompletedLocalDate(t);
+            return completedDate < yesterday && completedDate >= weekStart;
+        })).ToList();
+        var earlierTasks = SortByManual(filtered.Where(t =>
+        {
+            var completedDate = GetCompletedLocalDate(t);
+            return completedDate is null || completedDate < weekStart;
+        })).ToList();
+
+        var todayGroup = BuildGroup("今天", "已完成", false, todayTasks, catLookup, prevExpandedIds, searchMatchIds);
+        var yesterdayGroup = BuildGroup("昨天", yesterday.ToString("M月d日 ddd"), false, yesterdayTasks, catLookup, prevExpandedIds, searchMatchIds);
+        var weekGroup = BuildGroup("本周", "最近 7 天", false, weekTasks, catLookup, prevExpandedIds, searchMatchIds);
+        var earlierGroup = BuildGroup("更早", "已归档", false, earlierTasks, catLookup, prevExpandedIds, searchMatchIds);
+
+        if (todayGroup is not null) yield return todayGroup;
+        if (yesterdayGroup is not null) yield return yesterdayGroup;
+        if (weekGroup is not null) yield return weekGroup;
+        if (earlierGroup is not null) yield return earlierGroup;
     }
 
     private TaskGroupViewModel? BuildGroup(
@@ -442,7 +496,7 @@ public partial class MainViewModel : ObservableObject
             // 有快照时按快照还原；无快照时保持收起。搜索命中子任务时展开父任务展示命中项。
             vm.IsExpanded = hasMatchedSubtask || (hasPrev && prevExpandedIds!.Contains(roots[i].Id));
 
-            var visibleSubtasks = subtasks.Where(s => ShowCompleted || !s.Completed);
+            IEnumerable<TodoTask> visibleSubtasks = subtasks;
             if (searchMatchIds is not null && !searchMatchIds.Contains(roots[i].Id))
             {
                 visibleSubtasks = visibleSubtasks.Where(s => searchMatchIds.Contains(s.Id));
@@ -473,8 +527,9 @@ public partial class MainViewModel : ObservableObject
 
     private bool IsVisibleInCurrentView(TodoTask t)
     {
-        if (!ShowCompleted && t.Completed) return false;
         if (FilterCategoryId is { } catId && t.CategoryId != catId) return false;
+        if (CurrentView == TodoView.Completed) return t.Completed;
+        if (t.Completed) return false;
 
         return CurrentView switch
         {
@@ -483,6 +538,22 @@ public partial class MainViewModel : ObservableObject
             TodoView.Inbox => true,
             _ => true
         };
+    }
+
+    private bool MatchesCurrentCompletionScope(TodoTask t)
+    {
+        return CurrentView == TodoView.Completed ? t.Completed : !t.Completed;
+    }
+
+    private static IEnumerable<TodoTask> SortByManual(IEnumerable<TodoTask> tasks)
+    {
+        return tasks.OrderBy(t => t.SortOrder).ThenBy(t => t.Id);
+    }
+
+    private static DateTime? GetCompletedLocalDate(TodoTask t)
+    {
+        var completedAt = t.CompletedAt ?? t.UpdatedAt;
+        return completedAt == default ? null : completedAt.ToLocalTime().Date;
     }
 
     // 待办 = 今天 + 逾期 + 未排期。一切"该现在做的"都收到这里，未来才单独划进规划。
@@ -501,13 +572,13 @@ public partial class MainViewModel : ObservableObject
     private void RecountGlobal(IReadOnlyList<TodoTask> roots)
     {
         var open = roots.Where(t => !t.Completed).ToList();
+        var completed = roots.Where(t => t.Completed).ToList();
         TodayCount = open.Count(IsTodayTask);
         UpcomingCount = open.Count(IsUpcomingTask);
         InboxCount = open.Count;
+        CompletedCount = completed.Count;
 
-        var todayRoots = roots.Where(IsTodayTask).ToList();
-        TotalCount = todayRoots.Count;
-        CompletedCount = todayRoots.Count(t => t.Completed);
+        TotalCount = roots.Count;
         OnPropertyChanged(nameof(CompletionPercent));
     }
 
@@ -580,7 +651,7 @@ public partial class MainViewModel : ObservableObject
             CategoryId = categoryId,
             Priority = priority,
             DueAt = due?.ToUniversalTime(),
-            SortOrder = Tasks.Count
+            SortOrder = NextRootSortOrder()
         };
 
         _tasks.Insert(t);
@@ -673,25 +744,37 @@ public partial class MainViewModel : ObservableObject
         vm.Model.Completed = vm.Completed;
         vm.Model.CompletedAt = vm.Completed ? DateTime.UtcNow : null;
 
+        var isSubtask = vm.Model.ParentId is not null;
         if (FindVisibleParent(vm) is { } parent)
         {
-            if (vm.Completed && !ShowCompleted)
-            {
-                parent.Subtasks.Remove(vm);
-            }
-
             RefreshSubtaskStats(parent);
         }
 
         // 不重建整个列表：重建会让 CheckBox 实例销毁并新建，
         // 容易出现优先级 ring 颜色没及时复位等渲染细节 bug，而且任务会跳到底部。
         // 完成态切换是局部变化，让现有 CheckBox 自己根据 IsChecked 触发器更新就够了。
-        // 只更新计数器；如果 ShowCompleted=False 且刚刚完成，把这个项从可见列表中拿掉。
-        if (vm.Completed && !ShowCompleted)
+        // 只更新计数器；顶层任务完成态切换后不属于当前视图时，把这个项从可见列表中拿掉。
+        // 子任务始终作为父任务内容留在原位，只变更勾选样式和父任务进度。
+        if (!isSubtask && !IsVisibleInCurrentView(vm.Model))
         {
             RemoveFromVisible(vm);
         }
         RecountFromTasks();
+    }
+
+    public bool MoveCompletedSubtaskToTail(TaskItemViewModel? subtask)
+    {
+        if (subtask?.Completed != true) return false;
+
+        var parent = FindVisibleParentForSubtask(subtask);
+        if (parent is null) return false;
+
+        var oldIndex = parent.Subtasks.IndexOf(subtask);
+        if (oldIndex < 0 || oldIndex == parent.Subtasks.Count - 1) return false;
+
+        parent.Subtasks.Move(oldIndex, parent.Subtasks.Count - 1);
+        PersistSubtaskOrderForParent(parent);
+        return true;
     }
 
     private void RemoveFromVisible(TaskItemViewModel vm)
@@ -773,6 +856,14 @@ public partial class MainViewModel : ObservableObject
     private int NextSubtaskSortOrder(TaskItemViewModel parent)
     {
         return _tasks.GetSubtasks(parent.Model.Id).Count;
+    }
+
+    private int NextRootSortOrder()
+    {
+        return _tasks.GetAll(includeCompleted: true)
+            .Select(t => t.SortOrder)
+            .DefaultIfEmpty(-1)
+            .Max() + 1;
     }
 
     /// <summary>Apply a new due date/time to an existing task and persist.</summary>
@@ -901,7 +992,322 @@ public partial class MainViewModel : ObservableObject
 
     public void PersistOrder()
     {
-        _tasks.Reorder(Tasks.Select(t => t.Model.Id));
+        _tasks.Reorder(TaskGroups.SelectMany(g => g.Tasks).Select(t => t.Model.Id));
+    }
+
+    public bool MoveTask(TaskItemViewModel? source, TaskItemViewModel? target, bool insertAfter)
+    {
+        return MoveTaskCore(source, target, insertAfter, persist: true);
+    }
+
+    public bool PreviewMoveTask(TaskItemViewModel? source, TaskItemViewModel? target, bool insertAfter)
+    {
+        return MoveTaskCore(source, target, insertAfter, persist: false);
+    }
+
+    public bool PreviewMoveSubtask(TaskItemViewModel? source, TaskItemViewModel? target, bool insertAfter)
+    {
+        return MoveSubtaskCore(source, target, insertAfter);
+    }
+
+    private bool MoveTaskCore(TaskItemViewModel? source, TaskItemViewModel? target, bool insertAfter, bool persist)
+    {
+        if (!CanMoveTask(source, target))
+        {
+            return false;
+        }
+
+        var sourceGroup = TaskGroups.First(g => g.Tasks.Contains(source!));
+
+        var oldIndex = sourceGroup.Tasks.IndexOf(source!);
+        if (oldIndex < 0) return false;
+
+        var targetIndex = sourceGroup.Tasks.IndexOf(target!);
+        if (targetIndex < 0) return false;
+
+        var targetIndexAfterRemoval = oldIndex < targetIndex ? targetIndex - 1 : targetIndex;
+        var newIndex = insertAfter ? targetIndexAfterRemoval + 1 : targetIndexAfterRemoval;
+        if (newIndex == oldIndex)
+        {
+            return false;
+        }
+
+        sourceGroup.Tasks.RemoveAt(oldIndex);
+        sourceGroup.Tasks.Insert(Math.Clamp(newIndex, 0, sourceGroup.Tasks.Count), source!);
+
+        RebuildFlatTaskList();
+        if (persist)
+        {
+            PersistOrderForGroup(sourceGroup);
+        }
+
+        return true;
+    }
+
+    public bool CanMoveTask(TaskItemViewModel? source, TaskItemViewModel? target)
+    {
+        if (!CanReorderTasks || source is null || target is null || ReferenceEquals(source, target))
+        {
+            return false;
+        }
+
+        if (source.Model.ParentId != target.Model.ParentId)
+        {
+            return false;
+        }
+
+        var sourceGroup = TaskGroups.FirstOrDefault(g => g.Tasks.Contains(source));
+        var targetGroup = TaskGroups.FirstOrDefault(g => g.Tasks.Contains(target));
+        return sourceGroup is not null && ReferenceEquals(sourceGroup, targetGroup);
+    }
+
+    private bool MoveSubtaskCore(TaskItemViewModel? source, TaskItemViewModel? target, bool insertAfter)
+    {
+        if (!CanMoveSubtask(source, target))
+        {
+            return false;
+        }
+
+        var parent = FindVisibleParentForSubtask(source!);
+        if (parent is null) return false;
+
+        var oldIndex = parent.Subtasks.IndexOf(source!);
+        var targetIndex = parent.Subtasks.IndexOf(target!);
+        if (oldIndex < 0 || targetIndex < 0) return false;
+
+        var targetIndexAfterRemoval = oldIndex < targetIndex ? targetIndex - 1 : targetIndex;
+        var newIndex = insertAfter ? targetIndexAfterRemoval + 1 : targetIndexAfterRemoval;
+        if (newIndex == oldIndex)
+        {
+            return false;
+        }
+
+        parent.Subtasks.RemoveAt(oldIndex);
+        parent.Subtasks.Insert(Math.Clamp(newIndex, 0, parent.Subtasks.Count), source!);
+        return true;
+    }
+
+    public bool CanMoveSubtask(TaskItemViewModel? source, TaskItemViewModel? target)
+    {
+        if (!CanReorderTasks || source is null || target is null || ReferenceEquals(source, target))
+        {
+            return false;
+        }
+
+        if (source.Model.ParentId is null || source.Model.ParentId != target.Model.ParentId)
+        {
+            return false;
+        }
+
+        var parent = FindVisibleParentForSubtask(source);
+        return parent is not null && parent.Subtasks.Contains(target);
+    }
+
+    private TaskItemViewModel? FindVisibleParentForSubtask(TaskItemViewModel subtask)
+    {
+        return TaskGroups
+            .SelectMany(g => g.Tasks)
+            .FirstOrDefault(parent => parent.Subtasks.Contains(subtask));
+    }
+
+    private void RebuildFlatTaskList()
+    {
+        Tasks.Clear();
+        foreach (var task in TaskGroups.SelectMany(g => g.Tasks))
+        {
+            Tasks.Add(task);
+        }
+    }
+
+    public IReadOnlyList<long> SnapshotVisibleTaskOrder()
+    {
+        return TaskGroups.SelectMany(g => g.Tasks).Select(t => t.Model.Id).ToList();
+    }
+
+    public bool RestoreVisibleTaskOrder(IReadOnlyList<long>? orderedIds)
+    {
+        if (orderedIds is null || orderedIds.Count == 0) return false;
+
+        var order = orderedIds
+            .Select((id, index) => new { id, index })
+            .ToDictionary(x => x.id, x => x.index);
+        var changed = false;
+
+        foreach (var group in TaskGroups)
+        {
+            var current = group.Tasks.ToList();
+            var restored = current
+                .Select((task, currentIndex) => new { task, currentIndex })
+                .OrderBy(x => order.TryGetValue(x.task.Model.Id, out var index) ? index : int.MaxValue)
+                .ThenBy(x => x.currentIndex)
+                .Select(x => x.task)
+                .ToList();
+
+            if (current.Select(t => t.Model.Id).SequenceEqual(restored.Select(t => t.Model.Id)))
+            {
+                continue;
+            }
+
+            group.Tasks.Clear();
+            foreach (var task in restored)
+            {
+                group.Tasks.Add(task);
+            }
+            changed = true;
+        }
+
+        if (changed)
+        {
+            RebuildFlatTaskList();
+        }
+
+        return changed;
+    }
+
+    public IReadOnlyList<long> SnapshotVisibleSubtaskOrder(TaskItemViewModel? subtask)
+    {
+        var parent = subtask is null ? null : FindVisibleParentForSubtask(subtask);
+        return parent?.Subtasks.Select(s => s.Model.Id).ToList() ?? [];
+    }
+
+    public bool RestoreVisibleSubtaskOrder(TaskItemViewModel? subtask, IReadOnlyList<long>? orderedIds)
+    {
+        if (subtask is null || orderedIds is null || orderedIds.Count == 0) return false;
+        var parent = FindVisibleParentForSubtask(subtask);
+        if (parent is null) return false;
+
+        var order = orderedIds
+            .Select((id, index) => new { id, index })
+            .ToDictionary(x => x.id, x => x.index);
+        var current = parent.Subtasks.ToList();
+        var restored = current
+            .Select((task, currentIndex) => new { task, currentIndex })
+            .OrderBy(x => order.TryGetValue(x.task.Model.Id, out var index) ? index : int.MaxValue)
+            .ThenBy(x => x.currentIndex)
+            .Select(x => x.task)
+            .ToList();
+
+        if (current.Select(t => t.Model.Id).SequenceEqual(restored.Select(t => t.Model.Id)))
+        {
+            return false;
+        }
+
+        parent.Subtasks.Clear();
+        foreach (var task in restored)
+        {
+            parent.Subtasks.Add(task);
+        }
+
+        return true;
+    }
+
+    public void PersistOrderForTask(TaskItemViewModel? task)
+    {
+        var group = task is null
+            ? null
+            : TaskGroups.FirstOrDefault(g => g.Tasks.Contains(task));
+        if (group is null) return;
+
+        PersistOrderForGroup(group);
+    }
+
+    public void PersistOrderForSubtask(TaskItemViewModel? subtask)
+    {
+        var parent = subtask is null ? null : FindVisibleParentForSubtask(subtask);
+        if (parent is null) return;
+
+        PersistSubtaskOrderForParent(parent);
+    }
+
+    private void PersistOrderForGroup(TaskGroupViewModel group)
+    {
+        var groupIds = group.Tasks.Select(t => t.Model.Id).ToList();
+        var groupIdSet = groupIds.ToHashSet();
+        var allRoots = _tasks.GetAll(includeCompleted: true)
+            .Where(t => t.ParentId is null)
+            .OrderBy(t => t.SortOrder)
+            .ThenBy(t => t.Id)
+            .ToList();
+
+        var orderedIds = new List<long>();
+        var insertedGroup = false;
+        foreach (var task in allRoots)
+        {
+            if (groupIdSet.Contains(task.Id))
+            {
+                if (!insertedGroup)
+                {
+                    orderedIds.AddRange(groupIds);
+                    insertedGroup = true;
+                }
+                continue;
+            }
+
+            orderedIds.Add(task.Id);
+        }
+
+        if (!insertedGroup)
+        {
+            orderedIds.AddRange(groupIds);
+        }
+
+        _tasks.Reorder(orderedIds);
+
+        var sortLookup = orderedIds
+            .Select((id, index) => new { id, index })
+            .ToDictionary(x => x.id, x => x.index);
+        foreach (var task in TaskGroups.SelectMany(g => g.Tasks))
+        {
+            if (sortLookup.TryGetValue(task.Model.Id, out var sortOrder))
+            {
+                task.Model.SortOrder = sortOrder;
+            }
+        }
+    }
+
+    private void PersistSubtaskOrderForParent(TaskItemViewModel parent)
+    {
+        var visibleIds = parent.Subtasks.Select(s => s.Model.Id).ToList();
+        var visibleIdSet = visibleIds.ToHashSet();
+        var allSubtasks = _tasks.GetSubtasks(parent.Model.Id)
+            .OrderBy(t => t.SortOrder)
+            .ThenBy(t => t.Id)
+            .ToList();
+
+        var orderedIds = new List<long>();
+        var insertedVisible = false;
+        foreach (var subtask in allSubtasks)
+        {
+            if (visibleIdSet.Contains(subtask.Id))
+            {
+                if (!insertedVisible)
+                {
+                    orderedIds.AddRange(visibleIds);
+                    insertedVisible = true;
+                }
+                continue;
+            }
+
+            orderedIds.Add(subtask.Id);
+        }
+
+        if (!insertedVisible)
+        {
+            orderedIds.AddRange(visibleIds);
+        }
+
+        _tasks.Reorder(orderedIds);
+
+        var sortLookup = orderedIds
+            .Select((id, index) => new { id, index })
+            .ToDictionary(x => x.id, x => x.index);
+        foreach (var subtask in parent.Subtasks)
+        {
+            if (sortLookup.TryGetValue(subtask.Model.Id, out var sortOrder))
+            {
+                subtask.Model.SortOrder = sortOrder;
+            }
+        }
     }
 
     private long? ResolveCategoryId(string? name)
@@ -1056,11 +1462,21 @@ public partial class MainViewModel : ObservableObject
         };
     }
 
-    partial void OnSearchTextChanged(string value) => ReloadTasks();
+    partial void OnSearchTextChanged(string value)
+    {
+        OnPropertyChanged(nameof(CanReorderTasks));
+        ReloadTasks();
+    }
     partial void OnFilterCategoryIdChanged(long? value) => ReloadTasks();
 
     partial void OnIsSearchModeChanged(bool value)
     {
+        if (!value && IsSearchOnlyView)
+        {
+            IsSearchMode = true;
+            return;
+        }
+
         // 切换模式：清空共享输入框 + 清空对应的 sink，避免上一次的草稿/搜索词残留
         QuickInput = string.Empty;
         SearchText = string.Empty;
@@ -1169,8 +1585,30 @@ public partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(IsTodayView));
         OnPropertyChanged(nameof(IsUpcomingView));
         OnPropertyChanged(nameof(IsInboxView));
+        OnPropertyChanged(nameof(IsCompletedView));
         OnPropertyChanged(nameof(ViewTitle));
         OnPropertyChanged(nameof(EmptyTitle));
+        OnPropertyChanged(nameof(EmptySubtitle));
+        OnPropertyChanged(nameof(CanReorderTasks));
+        OnPropertyChanged(nameof(IsSearchOnlyView));
+
+        if (value == TodoView.Completed)
+        {
+            _completedViewForcedSearch = !IsSearchMode;
+            if (!IsSearchMode)
+            {
+                IsSearchMode = true;
+            }
+        }
+        else if (_completedViewForcedSearch)
+        {
+            _completedViewForcedSearch = false;
+            if (IsSearchMode)
+            {
+                IsSearchMode = false;
+            }
+        }
+
         ReloadTasks();
     }
 

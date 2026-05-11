@@ -23,7 +23,8 @@
     </shell:WindowChrome.WindowChrome>
 
     <Border x:Name="RootBorder" Style="{StaticResource AppWindowShell}">
-        <Grid>
+        <AdornerDecorator>
+        <Grid x:Name="RootGrid">
             <Grid.RowDefinitions>
                 <RowDefinition Height="38"/>
                 <RowDefinition Height="Auto"/>
@@ -37,19 +38,25 @@
                   Background="Transparent"
                   Cursor="SizeAll">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="6"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
                 <Border Grid.Column="0"
                         Style="{StaticResource SegmentedShell}"
-                        Margin="14,4,0,4"
-                        VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal">
-                        <ToggleButton Style="{StaticResource SegmentedToggleButton}"
-                                      IsChecked="{Binding IsTodayView, Mode=TwoWay}">
+                        Margin="12,4,6,4"
+                        VerticalAlignment="Center"
+                        HorizontalAlignment="Stretch">
+                    <UniformGrid x:Name="TopTabGrid" Columns="4" Rows="1">
+                        <ToggleButton x:Name="TodayTab"
+                                      Style="{StaticResource SegmentedToggleButton}"
+                                      IsChecked="{Binding IsTodayView, Mode=TwoWay}"
+                                      ToolTip="待办"
+                                      AutomationProperties.Name="待办"
+                                      Tag="Today"
+                                      Click="TopTab_Click">
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock Text="待办" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                 <TextBlock x:Name="TodayCountText"
@@ -60,8 +67,13 @@
                                            VerticalAlignment="Center"/>
                             </StackPanel>
                         </ToggleButton>
-                        <ToggleButton Style="{StaticResource SegmentedToggleButton}"
-                                      IsChecked="{Binding IsUpcomingView, Mode=TwoWay}">
+                        <ToggleButton x:Name="UpcomingTab"
+                                      Style="{StaticResource SegmentedToggleButton}"
+                                      IsChecked="{Binding IsUpcomingView, Mode=TwoWay}"
+                                      ToolTip="规划"
+                                      AutomationProperties.Name="规划"
+                                      Tag="Upcoming"
+                                      Click="TopTab_Click">
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock Text="规划" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                 <TextBlock x:Name="UpcomingCountText"
@@ -72,8 +84,13 @@
                                            VerticalAlignment="Center"/>
                             </StackPanel>
                         </ToggleButton>
-                        <ToggleButton Style="{StaticResource SegmentedToggleButton}"
-                                      IsChecked="{Binding IsInboxView, Mode=TwoWay}">
+                        <ToggleButton x:Name="InboxTab"
+                                      Style="{StaticResource SegmentedToggleButton}"
+                                      IsChecked="{Binding IsInboxView, Mode=TwoWay}"
+                                      ToolTip="全部待办"
+                                      AutomationProperties.Name="全部"
+                                      Tag="Inbox"
+                                      Click="TopTab_Click">
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock Text="全部" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                 <TextBlock x:Name="InboxCountText"
@@ -84,7 +101,24 @@
                                            VerticalAlignment="Center"/>
                             </StackPanel>
                         </ToggleButton>
-                    </StackPanel>
+                        <ToggleButton x:Name="CompletedTab"
+                                      Style="{StaticResource SegmentedToggleButton}"
+                                      IsChecked="{Binding IsCompletedView, Mode=TwoWay}"
+                                      ToolTip="已完成"
+                                      AutomationProperties.Name="完成"
+                                      Tag="Completed"
+                                      Click="TopTab_Click">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="完成" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="CompletedCountText"
+                                           Text="{Binding CompletedCount}"
+                                           Margin="5,0,0,0"
+                                           Opacity="0.75"
+                                           FontSize="11"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </ToggleButton>
+                    </UniformGrid>
                 </Border>
 
                 <!-- 中间空白列：拖拽区 -->
@@ -114,14 +148,11 @@
                             Click="BtnSettings_Click">
                         <Button.ContextMenu>
                             <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                                <MenuItem Header="显示已完成"
-                                          IsCheckable="True"
-                                          IsChecked="{Binding ShowCompleted}"
-                                          Command="{Binding ToggleShowCompletedCommand}"/>
                                 <MenuItem Header="自动隐藏"
                                           IsCheckable="True"
                                           IsChecked="{Binding AutoHideEnabled}"
                                           Command="{Binding ToggleAutoHideCommand}"/>
+                                <MenuItem Header="检查更新…" Click="MenuCheckUpdates_Click"/>
                                 <Separator/>
                                 <MenuItem Header="分类管理…" Click="MenuCategories_Click"/>
                             </ContextMenu>
@@ -428,9 +459,13 @@
                                                       Focusable="False">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate DataType="{x:Type vm:TaskItemViewModel}">
-                                                    <StackPanel Margin="0,0,0,6">
+                                                    <StackPanel x:Name="TaskCard"
+                                                                Tag="{Binding}"
+                                                                Margin="0,0,0,6">
                                                         <Border x:Name="TaskRow"
                                                                 Tag="{Binding}"
+                                                                PreviewMouseLeftButtonDown="TaskRow_PreviewMouseLeftButtonDown"
+                                                                PreviewMouseMove="TaskRow_PreviewMouseMove"
                                                                 MouseLeftButtonUp="TaskRow_LeftClick">
                                                             <Border.Style>
                                                                 <Style TargetType="Border" BasedOn="{StaticResource TaskRow}">
@@ -871,7 +906,10 @@
                                                                         <DataTemplate DataType="{x:Type vm:TaskItemViewModel}">
                                                                             <Border x:Name="SubRow"
                                                                                     FocusVisualStyle="{x:Null}"
-                                                                                    Tag="{Binding}">
+                                                                                    Tag="{Binding}"
+                                                                                    PreviewMouseLeftButtonDown="SubtaskRow_PreviewMouseLeftButtonDown"
+                                                                                    PreviewMouseMove="SubtaskRow_PreviewMouseMove"
+                                                                                    MouseLeftButtonUp="SubtaskRow_MouseLeftButtonUp">
                                                                                 <Border.Style>
                                                                                     <Style TargetType="Border">
                                                                                         <Setter Property="Background" Value="Transparent"/>
@@ -923,12 +961,12 @@
                                                                                     <Grid Grid.Column="1" Margin="8,0,8,0">
                                                                                         <TextBlock Text="{Binding Title}"
                                                                                                    VerticalAlignment="Center"
-                                                                                                   Cursor="IBeam"
-                                                                                                   MouseLeftButtonUp="SubtaskTitle_Click">
+                                                                                                   Cursor="IBeam">
                                                                                             <TextBlock.Style>
                                                                                                 <Style TargetType="TextBlock" BasedOn="{StaticResource TaskTitleText}">
                                                                                                     <Setter Property="FontSize" Value="13"/>
                                                                                                     <Setter Property="LineHeight" Value="18"/>
+                                                                                                    <Setter Property="MaxHeight" Value="54"/>
                                                                                                     <Style.Triggers>
                                                                                                         <DataTrigger Binding="{Binding Completed}" Value="True">
                                                                                                             <Setter Property="TextDecorations" Value="{StaticResource StrikethroughCentered}"/>
@@ -1163,7 +1201,7 @@
                                    Foreground="{StaticResource Ink2Brush}"
                                    Margin="0,18,0,0"
                                    HorizontalAlignment="Center"/>
-                        <TextBlock Text="从上方添加一项任务开始记录"
+                        <TextBlock Text="{Binding EmptySubtitle}"
                                    Foreground="{StaticResource Ink3Brush}"
                                    FontSize="12"
                                    Margin="0,6,0,0"
@@ -1319,5 +1357,6 @@
                 </Border>
             </Popup>
         </Grid>
+        </AdornerDecorator>
     </Border>
 </Window>

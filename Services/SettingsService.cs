@@ -49,6 +49,12 @@ public class SettingsService
         set => _repo.Set("show.completed", value ? "1" : "0");
     }
 
+    public string TopTabOrder
+    {
+        get => _repo.Get("top.tab.order") ?? string.Empty;
+        set => _repo.Set("top.tab.order", value);
+    }
+
     private double GetDouble(string key, double defaultValue)
     {
         var v = _repo.Get(key);

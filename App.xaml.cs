@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows;
 using TodoFloat.Data;
 using TodoFloat.Services;
+using Velopack;
 
 namespace TodoFloat;
 
@@ -11,6 +12,16 @@ public partial class App : Application
     public static ReminderService Reminders { get; private set; } = null!;
 
     private static System.Threading.Mutex? _singleInstanceMutex;
+
+    [STAThread]
+    public static void Main(string[] args)
+    {
+        VelopackApp.Build().Run();
+
+        var app = new App();
+        app.InitializeComponent();
+        app.Run();
+    }
 
     protected override void OnStartup(StartupEventArgs e)
     {
