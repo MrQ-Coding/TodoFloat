@@ -1,18 +1,18 @@
 using System.Windows.Threading;
 using Microsoft.Toolkit.Uwp.Notifications;
-using TodoFloat.Data;
+using TodoFloat.Application;
 
 namespace TodoFloat.Services;
 
 public class ReminderService : IDisposable
 {
     private readonly DispatcherTimer _timer;
-    private readonly TaskRepository _repo;
+    private readonly ITodoApi _todoApi;
     private readonly HashSet<long> _firedThisSession = new();
 
-    public ReminderService(TaskRepository repo)
+    public ReminderService(ITodoApi todoApi)
     {
-        _repo = repo;
+        _todoApi = todoApi;
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         _timer.Tick += (_, _) => Check();
     }
@@ -26,7 +26,7 @@ public class ReminderService : IDisposable
     private void Check()
     {
         var now = DateTime.UtcNow;
-        foreach (var t in _repo.GetAll(includeCompleted: false))
+        foreach (var t in _todoApi.ListTasks(new TodoTaskQuery(IncludeCompleted: false)))
         {
             if (t.RemindAt is null) continue;
             if (_firedThisSession.Contains(t.Id)) continue;
@@ -42,8 +42,18 @@ public class ReminderService : IDisposable
             catch { /* ignore notification platform errors */ }
 
             _firedThisSession.Add(t.Id);
-            t.RemindAt = null;
-            _repo.Update(t);
+            _todoApi.UpdateTask(new UpdateTaskRequest(
+                t.Id,
+                t.Title,
+                t.Notes,
+                t.ParentId,
+                t.CategoryId,
+                t.Priority,
+                t.DueAt,
+                null,
+                t.Completed,
+                t.CompletedAt,
+                t.SortOrder));
         }
     }
 

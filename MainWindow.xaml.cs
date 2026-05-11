@@ -12,6 +12,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using TodoFloat.Application;
 using TodoFloat.Controls;
 using TodoFloat.Services;
 using TodoFloat.ViewModels;
@@ -83,6 +84,7 @@ public partial class MainWindow : Window
     private enum CalendarPickerMode { Day, Month, Year }
 
     private readonly MainViewModel _vm;
+    private readonly ITodoApi _todoApi;
     private readonly SettingsService _settings = App.Settings;
     private readonly DispatcherTimer _saveDebounce;
     private readonly DispatcherTimer _autoHideTimer;
@@ -94,9 +96,15 @@ public partial class MainWindow : Window
     private const double TriggerSize = 4;
 
     public MainWindow()
+        : this(TodoApiFactory.CreateDefault())
+    {
+    }
+
+    public MainWindow(ITodoApi todoApi)
     {
         InitializeComponent();
-        _vm = new MainViewModel(_settings);
+        _todoApi = todoApi;
+        _vm = new MainViewModel(_settings, _todoApi);
         DataContext = _vm;
         AddHandler(
             UIElement.PreviewMouseDownEvent,
@@ -2718,7 +2726,7 @@ public partial class MainWindow : Window
 
     private void MenuCategories_Click(object sender, RoutedEventArgs e)
     {
-        var dlg = new Views.CategoriesDialog(_vm) { Owner = this };
+        var dlg = new Views.CategoriesDialog(_todoApi) { Owner = this };
         dlg.ShowDialog();
         _vm.ReloadAll();
     }

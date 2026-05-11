@@ -28,6 +28,14 @@ public class TaskRepository
         return conn.Query<TodoTask>(sql).ToList();
     }
 
+    public TodoTask? GetById(long id)
+    {
+        using var conn = Database.Open();
+        return conn.QueryFirstOrDefault<TodoTask>(
+            $"SELECT {Cols} FROM tasks WHERE id=@id",
+            new { id });
+    }
+
     public IReadOnlyList<TodoTask> GetSubtasks(long parentId)
     {
         using var conn = Database.Open();
@@ -156,6 +164,14 @@ public class CategoryRepository
         return conn.Query<Category>(
             "SELECT id Id, name Name, color Color, sort_order SortOrder FROM categories ORDER BY sort_order, id")
             .ToList();
+    }
+
+    public Category? GetById(long id)
+    {
+        using var conn = Database.Open();
+        return conn.QueryFirstOrDefault<Category>(
+            "SELECT id Id, name Name, color Color, sort_order SortOrder FROM categories WHERE id=@id",
+            new { id });
     }
 
     public long Insert(Category c)

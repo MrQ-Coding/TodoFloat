@@ -5,7 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
-using TodoFloat.Data;
+using TodoFloat.Application;
 using TodoFloat.Models;
 using TodoFloat.ViewModels;
 
@@ -14,7 +14,7 @@ namespace TodoFloat.Views;
 public partial class EditTaskDialog : Window
 {
     private readonly TaskItemViewModel _vm;
-    private readonly TaskRepository _tasks;
+    private readonly ITodoApi _todoApi;
 
     [DllImport("dwmapi.dll", PreserveSig = true)]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
@@ -24,8 +24,7 @@ public partial class EditTaskDialog : Window
     public EditTaskDialog(
         TaskItemViewModel vm,
         IList<Category> categories,
-        TaskRepository tasks,
-        CategoryRepository _)
+        ITodoApi todoApi)
     {
         InitializeComponent();
         SourceInitialized += (_, _) =>
@@ -36,7 +35,7 @@ public partial class EditTaskDialog : Window
             DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref pref, sizeof(int));
         };
         _vm = vm;
-        _tasks = tasks;
+        _todoApi = todoApi;
 
         TitleBox.Text = vm.Model.Title;
         NotesBox.Text = vm.Model.Notes ?? string.Empty;
@@ -83,7 +82,7 @@ public partial class EditTaskDialog : Window
         t.CategoryId = catId == 0 ? null : catId;
         t.DueAt = ParseDateTime(DueDate.SelectedDate, DueTime.Text);
         t.RemindAt = ParseDateTime(RemindDate.SelectedDate, RemindTime.Text);
-        _tasks.Update(t);
+        _todoApi.UpdateTask(TodoApiMapping.ToUpdateRequest(t));
         DialogResult = true;
         Close();
     }
