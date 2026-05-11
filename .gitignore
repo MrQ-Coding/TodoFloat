@@ -10,6 +10,7 @@
 [Ll]ogs/
 artifacts/
 publish/
+Releases/
 PublishProfiles/
 
 # Visual Studio cache / user files

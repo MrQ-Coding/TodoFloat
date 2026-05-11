@@ -96,7 +96,7 @@
     <Setter Property="FontFamily" Value="{StaticResource FontUI}"/>
     <Setter Property="FontSize" Value="12"/>
     <Setter Property="FontWeight" Value="SemiBold"/>
-    <Setter Property="Padding" Value="12,6"/>
+    <Setter Property="Padding" Value="7,6"/>
     <Setter Property="Cursor" Value="Hand"/>
     <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
     <Setter Property="Template">
@@ -219,6 +219,7 @@
     <Setter Property="FontWeight" Value="Medium"/>
     <Setter Property="Foreground" Value="{StaticResource InkBrush}"/>
     <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+    <Setter Property="TextWrapping" Value="Wrap"/>
   </Style>
 
   <Style x:Key="TaskMeta" TargetType="TextBlock">

@@ -173,6 +173,7 @@
                 <Setter Property="FontSize" Value="14"/>
                 <Setter Property="FontWeight" Value="SemiBold"/>
                 <Setter Property="LineHeight" Value="19"/>
+                <Setter Property="MaxHeight" Value="57"/>
             </Style>
             <Style x:Key="MetaText" TargetType="TextBlock" BasedOn="{StaticResource TaskMeta}"/>
             <Style x:Key="WindowProgress" TargetType="ProgressBar" BasedOn="{StaticResource ThinProgress}"/>
