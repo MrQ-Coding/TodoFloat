@@ -1,5 +1,4 @@
 using System.Linq;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Windows;
@@ -2684,15 +2683,32 @@ public partial class MainWindow : Window
 
         try
         {
-            var result = await new UpdateService().CheckLatestAsync();
+            var updateService = new UpdateService();
+            var result = await updateService.CheckForUpdatesAsync();
             switch (result.Status)
             {
                 case UpdateCheckStatus.UpdateAvailable:
-                    var message = $"发现新版本 {result.LatestVersion}\n当前版本 {result.CurrentVersion}\n\n是否打开下载页面？";
+                    var message = $"发现新版本 {result.LatestVersion}\n当前版本 {result.CurrentVersion}\n\n是否立即下载并重启完成更新？";
                     if (MessageBox.Show(this, message, "检查更新", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes
-                        && !string.IsNullOrWhiteSpace(result.ReleaseUrl))
+                        && result.UpdateInfo is not null)
                     {
-                        OpenExternalUrl(result.ReleaseUrl);
+                        var targetRelease = await updateService.DownloadUpdatesAsync(
+                            result.UpdateInfo,
+                            progress => SetUpdateMenuHeader(menuItem, $"下载更新 {progress}%"));
+
+                        MessageBox.Show(this, "更新已下载完成，应用将重启完成安装。", "检查更新", MessageBoxButton.OK, MessageBoxImage.Information);
+                        updateService.ApplyUpdatesAndRestart(targetRelease);
+                        return;
+                    }
+                    break;
+
+                case UpdateCheckStatus.PendingRestart:
+                    var restartMessage = $"新版本 {result.LatestVersion} 已下载完成。\n当前版本 {result.CurrentVersion}\n\n是否立即重启完成更新？";
+                    if (MessageBox.Show(this, restartMessage, "检查更新", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
+                    {
+                        SetUpdateMenuHeader(menuItem, "正在重启…");
+                        updateService.ApplyUpdatesAndRestart(result.PendingRestart);
+                        return;
                     }
                     break;
 
@@ -2700,8 +2716,8 @@ public partial class MainWindow : Window
                     MessageBox.Show(this, $"当前已是最新版本。\n当前版本 {result.CurrentVersion}", "检查更新", MessageBoxButton.OK, MessageBoxImage.Information);
                     break;
 
-                case UpdateCheckStatus.NoRelease:
-                    MessageBox.Show(this, "还没有可用的 GitHub Release。\n发布第一个 Release 后，这里就能检测到新版本。", "检查更新", MessageBoxButton.OK, MessageBoxImage.Information);
+                case UpdateCheckStatus.NotInstalled:
+                    MessageBox.Show(this, "当前运行的不是安装版，无法自动更新。\n请先安装 GitHub Release 里的 Setup 版本，之后就可以在应用内自动更新。", "检查更新", MessageBoxButton.OK, MessageBoxImage.Information);
                     break;
 
                 case UpdateCheckStatus.Failed:
@@ -2719,9 +2735,17 @@ public partial class MainWindow : Window
         }
     }
 
-    private static void OpenExternalUrl(string url)
+    private void SetUpdateMenuHeader(MenuItem? menuItem, string text)
     {
-        Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        if (menuItem is null) return;
+
+        if (Dispatcher.CheckAccess())
+        {
+            menuItem.Header = text;
+            return;
+        }
+
+        Dispatcher.Invoke(() => menuItem.Header = text);
     }
 
     private void MenuCategories_Click(object sender, RoutedEventArgs e)
