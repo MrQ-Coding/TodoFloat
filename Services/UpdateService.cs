@@ -1,9 +1,6 @@
-using System.Net;
-using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Reflection;
-using System.Text.Json;
-using System.Text.RegularExpressions;
+using Velopack;
+using Velopack.Sources;
 
 namespace TodoFloat.Services;
 
@@ -11,7 +8,8 @@ public enum UpdateCheckStatus
 {
     UpdateAvailable,
     UpToDate,
-    NoRelease,
+    PendingRestart,
+    NotInstalled,
     Failed
 }
 
@@ -19,61 +17,46 @@ public sealed record UpdateCheckResult(
     UpdateCheckStatus Status,
     string CurrentVersion,
     string? LatestVersion = null,
-    string? ReleaseName = null,
-    string? ReleaseUrl = null,
-    string? ErrorMessage = null);
+    string? ErrorMessage = null,
+    UpdateInfo? UpdateInfo = null,
+    VelopackAsset? PendingRestart = null);
 
 public sealed class UpdateService
 {
-    private const string LatestReleaseUrl = "https://api.github.com/repos/MrQ-Coding/TodoFloat/releases/latest";
-    private static readonly Regex VersionRegex = new(@"\d+(?:\.\d+){0,3}", RegexOptions.Compiled);
-    private static readonly HttpClient Client = CreateClient();
+    private const string RepoUrl = "https://github.com/MrQ-Coding/TodoFloat";
 
-    public async Task<UpdateCheckResult> CheckLatestAsync(CancellationToken cancellationToken = default)
+    public async Task<UpdateCheckResult> CheckForUpdatesAsync(CancellationToken cancellationToken = default)
     {
-        var current = GetCurrentVersion();
-        var currentText = ToDisplayVersion(current);
-
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, LatestReleaseUrl);
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
-            request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
+            var manager = CreateManager();
+            var currentText = ToDisplayVersion(manager.CurrentVersion) ?? GetAssemblyVersionText();
 
-            using var response = await Client.SendAsync(request, cancellationToken);
-            if (response.StatusCode == HttpStatusCode.NotFound)
+            if (!manager.IsInstalled)
             {
-                return new UpdateCheckResult(UpdateCheckStatus.NoRelease, currentText);
+                return new UpdateCheckResult(UpdateCheckStatus.NotInstalled, currentText);
             }
 
-            if (!response.IsSuccessStatusCode)
+            if (manager.UpdatePendingRestart is { } pending)
             {
                 return new UpdateCheckResult(
-                    UpdateCheckStatus.Failed,
+                    UpdateCheckStatus.PendingRestart,
                     currentText,
-                    ErrorMessage: $"GitHub 返回 {(int)response.StatusCode} {response.ReasonPhrase}");
+                    ToDisplayVersion(pending.Version),
+                    PendingRestart: pending);
             }
 
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-            var root = json.RootElement;
-            var tag = ReadString(root, "tag_name");
-            var latest = TryParseVersion(tag);
-            if (latest is null)
+            var updateInfo = await manager.CheckForUpdatesAsync();
+            if (updateInfo is null)
             {
-                return new UpdateCheckResult(
-                    UpdateCheckStatus.Failed,
-                    currentText,
-                    ErrorMessage: $"最新 Release 标签无法识别：{tag ?? "(空)"}");
+                return new UpdateCheckResult(UpdateCheckStatus.UpToDate, currentText);
             }
 
-            var latestText = ToDisplayVersion(latest);
-            var releaseName = ReadString(root, "name") ?? tag;
-            var releaseUrl = ReadString(root, "html_url");
-
-            return CompareVersions(latest, current) > 0
-                ? new UpdateCheckResult(UpdateCheckStatus.UpdateAvailable, currentText, latestText, releaseName, releaseUrl)
-                : new UpdateCheckResult(UpdateCheckStatus.UpToDate, currentText, latestText, releaseName, releaseUrl);
+            return new UpdateCheckResult(
+                UpdateCheckStatus.UpdateAvailable,
+                currentText,
+                ToDisplayVersion(updateInfo.TargetFullRelease.Version),
+                UpdateInfo: updateInfo);
         }
         catch (OperationCanceledException)
         {
@@ -81,67 +64,54 @@ public sealed class UpdateService
         }
         catch (Exception ex)
         {
-            return new UpdateCheckResult(UpdateCheckStatus.Failed, currentText, ErrorMessage: ex.Message);
+            return new UpdateCheckResult(
+                UpdateCheckStatus.Failed,
+                GetAssemblyVersionText(),
+                ErrorMessage: ex.Message);
         }
     }
 
-    private static HttpClient CreateClient()
+    public async Task<VelopackAsset> DownloadUpdatesAsync(
+        UpdateInfo updateInfo,
+        Action<int>? progress = null,
+        CancellationToken cancellationToken = default)
     {
-        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("TodoFloat");
-        return client;
-    }
-
-    private static Version GetCurrentVersion()
-    {
-        return Assembly.GetExecutingAssembly().GetName().Version ?? new Version(1, 0, 0);
-    }
-
-    private static string? ReadString(JsonElement element, string propertyName)
-    {
-        return element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
-            ? property.GetString()
-            : null;
-    }
-
-    private static Version? TryParseVersion(string? tag)
-    {
-        if (string.IsNullOrWhiteSpace(tag)) return null;
-
-        var match = VersionRegex.Match(tag.Trim().TrimStart('v', 'V'));
-        if (!match.Success) return null;
-
-        var parts = match.Value.Split('.', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 1)
+        var manager = CreateManager();
+        if (!manager.IsInstalled)
         {
-            return Version.TryParse($"{parts[0]}.0", out var single) ? single : null;
+            throw new InvalidOperationException("当前运行的不是安装版，无法自动更新。");
         }
 
-        if (parts.Length > 4)
-        {
-            parts = parts[..4];
-        }
-
-        return Version.TryParse(string.Join('.', parts), out var version) ? version : null;
+        await manager.DownloadUpdatesAsync(updateInfo, progress, cancellationToken);
+        return updateInfo.TargetFullRelease;
     }
 
-    private static int CompareVersions(Version left, Version right)
+    public void ApplyUpdatesAndRestart(VelopackAsset? targetRelease)
     {
-        return Normalize(left).CompareTo(Normalize(right));
+        var manager = CreateManager();
+        manager.ApplyUpdatesAndRestart(targetRelease, Array.Empty<string>());
     }
 
-    private static Version Normalize(Version version)
+    private static UpdateManager CreateManager()
     {
-        return new Version(
+        var source = new GithubSource(RepoUrl, string.Empty, false, null!);
+        return new UpdateManager(source, null!, null!);
+    }
+
+    private static string? ToDisplayVersion(object? version)
+    {
+        return version?.ToString();
+    }
+
+    private static string GetAssemblyVersionText()
+    {
+        var version = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(1, 0, 0);
+        var normalized = new Version(
             version.Major,
             version.Minor,
             Math.Max(version.Build, 0),
             Math.Max(version.Revision, 0));
-    }
 
-    private static string ToDisplayVersion(Version version)
-    {
-        var normalized = Normalize(version);
         return normalized.Revision > 0
             ? normalized.ToString(4)
             : normalized.ToString(3);

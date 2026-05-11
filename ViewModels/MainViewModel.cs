@@ -1267,35 +1267,13 @@ public partial class MainViewModel : ObservableObject
     private void PersistOrderForGroup(TaskGroupViewModel group)
     {
         var groupIds = group.Tasks.Select(t => t.Model.Id).ToList();
-        var groupIdSet = groupIds.ToHashSet();
         var allRoots = _todoApi.ListTasks(new TodoTaskQuery(IncludeCompleted: true, RootOnly: true))
             .Select(TodoApiMapping.ToModel)
             .OrderBy(t => t.SortOrder)
             .ThenBy(t => t.Id)
             .ToList();
 
-        var orderedIds = new List<long>();
-        var insertedGroup = false;
-        foreach (var task in allRoots)
-        {
-            if (groupIdSet.Contains(task.Id))
-            {
-                if (!insertedGroup)
-                {
-                    orderedIds.AddRange(groupIds);
-                    insertedGroup = true;
-                }
-                continue;
-            }
-
-            orderedIds.Add(task.Id);
-        }
-
-        if (!insertedGroup)
-        {
-            orderedIds.AddRange(groupIds);
-        }
-
+        var orderedIds = ReplaceScopedSortSlots(allRoots.Select(t => t.Id), groupIds);
         _todoApi.ReorderRootTasks(orderedIds);
 
         var sortLookup = orderedIds
@@ -1313,35 +1291,13 @@ public partial class MainViewModel : ObservableObject
     private void PersistSubtaskOrderForParent(TaskItemViewModel parent)
     {
         var visibleIds = parent.Subtasks.Select(s => s.Model.Id).ToList();
-        var visibleIdSet = visibleIds.ToHashSet();
         var allSubtasks = _todoApi.GetSubtasks(parent.Model.Id)
             .Select(TodoApiMapping.ToModel)
             .OrderBy(t => t.SortOrder)
             .ThenBy(t => t.Id)
             .ToList();
 
-        var orderedIds = new List<long>();
-        var insertedVisible = false;
-        foreach (var subtask in allSubtasks)
-        {
-            if (visibleIdSet.Contains(subtask.Id))
-            {
-                if (!insertedVisible)
-                {
-                    orderedIds.AddRange(visibleIds);
-                    insertedVisible = true;
-                }
-                continue;
-            }
-
-            orderedIds.Add(subtask.Id);
-        }
-
-        if (!insertedVisible)
-        {
-            orderedIds.AddRange(visibleIds);
-        }
-
+        var orderedIds = ReplaceScopedSortSlots(allSubtasks.Select(t => t.Id), visibleIds);
         _todoApi.ReorderRootTasks(orderedIds);
 
         var sortLookup = orderedIds
@@ -1354,6 +1310,34 @@ public partial class MainViewModel : ObservableObject
                 subtask.Model.SortOrder = sortOrder;
             }
         }
+    }
+
+    private static List<long> ReplaceScopedSortSlots(IEnumerable<long> allIds, IReadOnlyList<long> scopedIds)
+    {
+        var scopedIdSet = scopedIds.ToHashSet();
+        var remainingScopedIds = new Queue<long>(scopedIds);
+        var orderedIds = new List<long>();
+
+        foreach (var id in allIds)
+        {
+            if (!scopedIdSet.Contains(id))
+            {
+                orderedIds.Add(id);
+                continue;
+            }
+
+            if (remainingScopedIds.Count > 0)
+            {
+                orderedIds.Add(remainingScopedIds.Dequeue());
+            }
+        }
+
+        while (remainingScopedIds.Count > 0)
+        {
+            orderedIds.Add(remainingScopedIds.Dequeue());
+        }
+
+        return orderedIds;
     }
 
     private long? ResolveCategoryId(string? name)
