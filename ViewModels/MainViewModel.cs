@@ -867,10 +867,7 @@ public partial class MainViewModel : ObservableObject
     private void AddSubtask(TaskItemViewModel? parent)
     {
         if (parent is null) return;
-        _todoApi.CreateTask(new CreateTaskRequest(
-            "新子任务",
-            ParentId: parent.Model.Id,
-            SortOrder: NextSubtaskSortOrder(parent)));
+        CreateSubtaskAtTop(parent, "新子任务");
         ReloadTasks();
     }
 
@@ -880,26 +877,60 @@ public partial class MainViewModel : ObservableObject
         var trimmed = title?.Trim();
         if (string.IsNullOrEmpty(trimmed)) return;
 
-        var sortOrder = NextSubtaskSortOrder(parent);
+        var subtask = CreateSubtaskAtTop(parent, trimmed);
         var t = new TodoTask
         {
-            Id = _todoApi.CreateTask(new CreateTaskRequest(
-                trimmed,
-                ParentId: parent.Model.Id,
-                SortOrder: sortOrder)),
+            Id = subtask.Id,
             Title = trimmed,
             ParentId = parent.Model.Id,
-            SortOrder = sortOrder
+            SortOrder = subtask.SortOrder
         };
 
         var catLookup = Categories.ToDictionary(c => c.Id);
-        parent.Subtasks.Add(BuildVm(t, catLookup));
+        parent.Subtasks.Insert(0, BuildVm(t, catLookup));
+        RefreshVisibleSubtaskSortOrders(parent);
         RefreshSubtaskStats(parent);
     }
 
-    private int NextSubtaskSortOrder(TaskItemViewModel parent)
+    private TodoTaskDto CreateSubtaskAtTop(TaskItemViewModel parent, string title)
     {
-        return _todoApi.GetSubtasks(parent.Model.Id).Count;
+        var existingIds = _todoApi.GetSubtasks(parent.Model.Id)
+            .Select(TodoApiMapping.ToModel)
+            .OrderBy(t => t.SortOrder)
+            .ThenBy(t => t.Id)
+            .Select(t => t.Id)
+            .ToList();
+
+        var newId = _todoApi.CreateTask(new CreateTaskRequest(
+            title,
+            ParentId: parent.Model.Id,
+            SortOrder: 0));
+
+        var orderedIds = existingIds.Prepend(newId).ToList();
+        _todoApi.ReorderRootTasks(orderedIds);
+
+        return _todoApi.GetTask(newId) ?? new TodoTaskDto(
+            newId,
+            title,
+            Notes: null,
+            ParentId: parent.Model.Id,
+            CategoryId: null,
+            Priority: TaskPriority.None,
+            DueAt: null,
+            RemindAt: null,
+            Completed: false,
+            CompletedAt: null,
+            SortOrder: 0,
+            CreatedAt: DateTime.UtcNow,
+            UpdatedAt: DateTime.UtcNow);
+    }
+
+    private static void RefreshVisibleSubtaskSortOrders(TaskItemViewModel parent)
+    {
+        for (var i = 0; i < parent.Subtasks.Count; i++)
+        {
+            parent.Subtasks[i].Model.SortOrder = i;
+        }
     }
 
     private int NextRootSortOrder()
