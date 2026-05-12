@@ -6,7 +6,7 @@
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="TodoFloat"
         Width="{StaticResource WindowWidth}" Height="{StaticResource WindowHeight}"
-        MinWidth="320" MinHeight="380"
+        MinWidth="360" MinHeight="380"
         Background="{DynamicResource GlassBrush}"
         WindowStyle="None" AllowsTransparency="False"
         ResizeMode="CanResize"
@@ -44,82 +44,86 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <Border Grid.Column="0"
-                        Style="{StaticResource SegmentedShell}"
-                        Margin="12,4,6,4"
-                        VerticalAlignment="Center"
-                        HorizontalAlignment="Stretch">
-                    <UniformGrid x:Name="TopTabGrid" Columns="4" Rows="1" ClipToBounds="True">
-                        <ToggleButton x:Name="TodayTab"
-                                      Style="{StaticResource SegmentedToggleButton}"
-                                      IsChecked="{Binding IsTodayView, Mode=TwoWay}"
-                                      ToolTip="待办"
-                                      AutomationProperties.Name="待办"
-                                      Tag="Today"
-                                      Click="TopTab_Click">
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center">
-                                <TextBlock x:Name="TodayTabLabel" Text="待办" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
-                                <TextBlock x:Name="TodayCountText"
-                                           Text="{Binding TodayCount}"
-                                           Margin="5,0,0,0"
-                                           Opacity="0.75"
-                                           FontSize="11"
-                                           VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </ToggleButton>
-                        <ToggleButton x:Name="UpcomingTab"
-                                      Style="{StaticResource SegmentedToggleButton}"
-                                      IsChecked="{Binding IsUpcomingView, Mode=TwoWay}"
-                                      ToolTip="规划"
-                                      AutomationProperties.Name="规划"
-                                      Tag="Upcoming"
-                                      Click="TopTab_Click">
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center">
-                                <TextBlock x:Name="UpcomingTabLabel" Text="规划" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
-                                <TextBlock x:Name="UpcomingCountText"
-                                           Text="{Binding UpcomingCount}"
-                                           Margin="5,0,0,0"
-                                           Opacity="0.75"
-                                           FontSize="11"
-                                           VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </ToggleButton>
-                        <ToggleButton x:Name="InboxTab"
-                                      Style="{StaticResource SegmentedToggleButton}"
-                                      IsChecked="{Binding IsInboxView, Mode=TwoWay}"
-                                      ToolTip="全部待办"
-                                      AutomationProperties.Name="全部"
-                                      Tag="Inbox"
-                                      Click="TopTab_Click">
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center">
-                                <TextBlock x:Name="InboxTabLabel" Text="全部" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
-                                <TextBlock x:Name="InboxCountText"
-                                           Text="{Binding InboxCount}"
-                                           Margin="5,0,0,0"
-                                           Opacity="0.75"
-                                           FontSize="11"
-                                           VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </ToggleButton>
-                        <ToggleButton x:Name="CompletedTab"
-                                      Style="{StaticResource SegmentedToggleButton}"
-                                      IsChecked="{Binding IsCompletedView, Mode=TwoWay}"
-                                      ToolTip="已完成"
-                                      AutomationProperties.Name="完成"
-                                      Tag="Completed"
-                                      Click="TopTab_Click">
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center">
-                                <TextBlock x:Name="CompletedTabLabel" Text="完成" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
-                                <TextBlock x:Name="CompletedCountText"
-                                           Text="{Binding CompletedCount}"
-                                           Margin="5,0,0,0"
-                                           Opacity="0.75"
-                                           FontSize="11"
-                                           VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </ToggleButton>
-                    </UniformGrid>
-                </Border>
+                <Grid x:Name="TopTabHostSlot"
+                      Grid.Column="0"
+                      Margin="12,3,6,3"
+                      VerticalAlignment="Center"
+                      HorizontalAlignment="Stretch">
+                    <Border Style="{StaticResource SegmentedShell}"
+                            MaxWidth="{Binding ActualWidth, ElementName=TopTabHostSlot}"
+                            HorizontalAlignment="Left">
+                        <StackPanel x:Name="TopTabGrid" Orientation="Horizontal" ClipToBounds="True">
+                            <ToggleButton x:Name="TodayTab"
+                                          Style="{StaticResource SegmentedToggleButton}"
+                                          IsChecked="{Binding IsTodayView, Mode=TwoWay}"
+                                          ToolTip="待办"
+                                          AutomationProperties.Name="待办"
+                                          Tag="Today"
+                                          Click="TopTab_Click">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center">
+                                    <TextBlock x:Name="TodayTabLabel" Text="待办" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock x:Name="TodayCountText"
+                                               Text="{Binding TodayCount}"
+                                               Margin="5,0,0,0"
+                                               Opacity="0.75"
+                                               FontSize="11"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </ToggleButton>
+                            <ToggleButton x:Name="UpcomingTab"
+                                          Style="{StaticResource SegmentedToggleButton}"
+                                          IsChecked="{Binding IsUpcomingView, Mode=TwoWay}"
+                                          ToolTip="规划"
+                                          AutomationProperties.Name="规划"
+                                          Tag="Upcoming"
+                                          Click="TopTab_Click">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center">
+                                    <TextBlock x:Name="UpcomingTabLabel" Text="规划" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock x:Name="UpcomingCountText"
+                                               Text="{Binding UpcomingCount}"
+                                               Margin="5,0,0,0"
+                                               Opacity="0.75"
+                                               FontSize="11"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </ToggleButton>
+                            <ToggleButton x:Name="InboxTab"
+                                          Style="{StaticResource SegmentedToggleButton}"
+                                          IsChecked="{Binding IsInboxView, Mode=TwoWay}"
+                                          ToolTip="全部待办"
+                                          AutomationProperties.Name="全部"
+                                          Tag="Inbox"
+                                          Click="TopTab_Click">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center">
+                                    <TextBlock x:Name="InboxTabLabel" Text="全部" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock x:Name="InboxCountText"
+                                               Text="{Binding InboxCount}"
+                                               Margin="5,0,0,0"
+                                               Opacity="0.75"
+                                               FontSize="11"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </ToggleButton>
+                            <ToggleButton x:Name="CompletedTab"
+                                          Style="{StaticResource SegmentedToggleButton}"
+                                          IsChecked="{Binding IsCompletedView, Mode=TwoWay}"
+                                          ToolTip="已完成"
+                                          AutomationProperties.Name="完成"
+                                          Tag="Completed"
+                                          Click="TopTab_Click">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center">
+                                    <TextBlock x:Name="CompletedTabLabel" Text="完成" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock x:Name="CompletedCountText"
+                                               Text="{Binding CompletedCount}"
+                                               Margin="5,0,0,0"
+                                               Opacity="0.75"
+                                               FontSize="11"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </ToggleButton>
+                        </StackPanel>
+                    </Border>
+                </Grid>
 
                 <!-- 中间空白列：拖拽区 -->
 

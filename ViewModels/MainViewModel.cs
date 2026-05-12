@@ -522,7 +522,7 @@ public partial class MainViewModel : ObservableObject
             // 有快照时按快照还原；无快照时保持收起。搜索命中子任务时展开父任务展示命中项。
             vm.IsExpanded = hasMatchedSubtask || (hasPrev && prevExpandedIds!.Contains(roots[i].Id));
 
-            IEnumerable<TodoTask> visibleSubtasks = subtasks;
+            IEnumerable<TodoTask> visibleSubtasks = SortSubtasksForDisplay(subtasks);
             if (searchMatchIds is not null && !searchMatchIds.Contains(roots[i].Id))
             {
                 visibleSubtasks = visibleSubtasks.Where(s => searchMatchIds.Contains(s.Id));
@@ -550,6 +550,27 @@ public partial class MainViewModel : ObservableObject
         }
         return vm;
     }
+
+    private static IEnumerable<TodoTask> SortSubtasksForDisplay(IEnumerable<TodoTask> subtasks)
+    {
+        return subtasks
+            .OrderBy(t => t.Completed)
+            .ThenBy(t => t.Completed ? CompletedTailSortKey(t) : DateTime.MinValue)
+            .ThenBy(t => t.SortOrder)
+            .ThenBy(t => t.Id);
+    }
+
+    private static IEnumerable<TaskItemViewModel> SortSubtasksForDisplay(IEnumerable<TaskItemViewModel> subtasks)
+    {
+        return subtasks
+            .OrderBy(t => t.Completed)
+            .ThenBy(t => t.Completed ? CompletedTailSortKey(t.Model) : DateTime.MinValue)
+            .ThenBy(t => t.Model.SortOrder)
+            .ThenBy(t => t.Model.Id);
+    }
+
+    private static DateTime CompletedTailSortKey(TodoTask task) =>
+        task.CompletedAt ?? task.UpdatedAt;
 
     private bool IsVisibleInCurrentView(TodoTask t)
     {
@@ -794,7 +815,7 @@ public partial class MainViewModel : ObservableObject
         // 容易出现优先级 ring 颜色没及时复位等渲染细节 bug，而且任务会跳到底部。
         // 完成态切换是局部变化，让现有 CheckBox 自己根据 IsChecked 触发器更新就够了。
         // 只更新计数器；顶层任务完成态切换后不属于当前视图时，把这个项从可见列表中拿掉。
-        // 子任务始终作为父任务内容留在原位，只变更勾选样式和父任务进度。
+        // 子任务不重建父列表；完成后的视觉排序由局部动画处理，避免闪烁。
         if (!isSubtask && !IsVisibleInCurrentView(vm.Model))
         {
             RemoveFromVisible(vm);
@@ -813,7 +834,29 @@ public partial class MainViewModel : ObservableObject
         if (oldIndex < 0 || oldIndex == parent.Subtasks.Count - 1) return false;
 
         parent.Subtasks.Move(oldIndex, parent.Subtasks.Count - 1);
-        PersistSubtaskOrderForParent(parent);
+        return true;
+    }
+
+    public bool MoveOpenSubtaskToStoredPosition(TaskItemViewModel? subtask)
+    {
+        if (subtask?.Completed != false) return false;
+
+        var parent = FindVisibleParentForSubtask(subtask);
+        if (parent is null) return false;
+
+        var current = parent.Subtasks.ToList();
+        var reordered = SortSubtasksForDisplay(current).ToList();
+        if (current.Select(s => s.Model.Id).SequenceEqual(reordered.Select(s => s.Model.Id)))
+        {
+            return false;
+        }
+
+        parent.Subtasks.Clear();
+        foreach (var item in reordered)
+        {
+            parent.Subtasks.Add(item);
+        }
+
         return true;
     }
 
@@ -888,7 +931,7 @@ public partial class MainViewModel : ObservableObject
 
         var catLookup = Categories.ToDictionary(c => c.Id);
         parent.Subtasks.Insert(0, BuildVm(t, catLookup));
-        RefreshVisibleSubtaskSortOrders(parent);
+        RefreshVisibleSubtaskSortOrdersFromStore(parent);
         RefreshSubtaskStats(parent);
     }
 
@@ -925,11 +968,17 @@ public partial class MainViewModel : ObservableObject
             UpdatedAt: DateTime.UtcNow);
     }
 
-    private static void RefreshVisibleSubtaskSortOrders(TaskItemViewModel parent)
+    private void RefreshVisibleSubtaskSortOrdersFromStore(TaskItemViewModel parent)
     {
-        for (var i = 0; i < parent.Subtasks.Count; i++)
+        var sortLookup = _todoApi.GetSubtasks(parent.Model.Id)
+            .ToDictionary(t => t.Id, t => t.SortOrder);
+
+        foreach (var subtask in parent.Subtasks)
         {
-            parent.Subtasks[i].Model.SortOrder = i;
+            if (sortLookup.TryGetValue(subtask.Model.Id, out var sortOrder))
+            {
+                subtask.Model.SortOrder = sortOrder;
+            }
         }
     }
 
@@ -1321,7 +1370,15 @@ public partial class MainViewModel : ObservableObject
 
     private void PersistSubtaskOrderForParent(TaskItemViewModel parent)
     {
-        var visibleIds = parent.Subtasks.Select(s => s.Model.Id).ToList();
+        var visibleIds = parent.Subtasks
+            .Where(s => !s.Completed)
+            .Select(s => s.Model.Id)
+            .ToList();
+        if (visibleIds.Count == 0)
+        {
+            visibleIds = parent.Subtasks.Select(s => s.Model.Id).ToList();
+        }
+
         var allSubtasks = _todoApi.GetSubtasks(parent.Model.Id)
             .Select(TodoApiMapping.ToModel)
             .OrderBy(t => t.SortOrder)

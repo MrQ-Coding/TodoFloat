@@ -120,7 +120,6 @@ public partial class MainWindow : Window
         SourceInitialized += MainWindow_SourceInitialized;
         LocationChanged += (_, _) => _saveDebounce.Restart();
         SizeChanged += (_, _) => { _saveDebounce.Restart(); ApplyResponsiveTopBar(); };
-        TopTabGrid.SizeChanged += (_, _) => ApplyResponsiveTopBar();
         PreviewMouseDown += MainWindow_PreviewMouseDown;
         MouseLeftButtonDown += MainWindow_MouseLeftButtonDown;
         KeyDown += MainWindow_KeyDown;
@@ -1502,7 +1501,10 @@ public partial class MainWindow : Window
             scale.BeginAnimation(ScaleTransform.ScaleYProperty, anim);
 
             var shouldMoveCompletedSubtask = vm.Model.ParentId is not null && !vm.Completed;
-            var previousSubtaskBounds = shouldMoveCompletedSubtask ? CaptureSubtaskRowBounds() : null;
+            var shouldRestoreOpenSubtask = vm.Model.ParentId is not null && vm.Completed;
+            var previousSubtaskBounds = shouldMoveCompletedSubtask || shouldRestoreOpenSubtask
+                ? CaptureSubtaskRowBounds()
+                : null;
 
             _vm.ToggleCompleteCommand.Execute(vm);
 
@@ -1511,6 +1513,16 @@ public partial class MainWindow : Window
                 Dispatcher.BeginInvoke(new Action(() =>
                 {
                     if (!_vm.MoveCompletedSubtaskToTail(vm)) return;
+
+                    UpdateLayout();
+                    AnimateSubtaskRowsFrom(previousSubtaskBounds);
+                }), DispatcherPriority.ContextIdle);
+            }
+            else if (shouldRestoreOpenSubtask && previousSubtaskBounds is not null)
+            {
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (!_vm.MoveOpenSubtaskToStoredPosition(vm)) return;
 
                     UpdateLayout();
                     AnimateSubtaskRowsFrom(previousSubtaskBounds);
@@ -3087,61 +3099,60 @@ public partial class MainWindow : Window
         return false;
     }
 
-    // ===== 顶栏自适应：按 tab 实际可用宽度和 DPI 缩放逐级折叠 =====
+    // ===== 顶栏自适应：正常按内容宽度，窄窗口时隐藏数量并收紧间距 =====
     private void ApplyResponsiveTopBar()
     {
         if (TodayCountText == null || TopTabGrid == null) return; // 尚未 InitializeComponent
 
-        var tabCount = Math.Max(1, TopTabGrid.Children.OfType<ToggleButton>().Count());
-        var tabCellWidth = TopTabGrid.ActualWidth > 1
-            ? TopTabGrid.ActualWidth / tabCount
-            : Math.Max(0, ActualWidth - 138) / tabCount;
-
-        var isSearchVisible = SearchButton?.Visibility != Visibility.Collapsed;
-        var searchCellThreshold = isSearchVisible ? 48 : 60;
-        var showSearch = ActualWidth >= 360 && tabCellWidth >= searchCellThreshold;
-        var nextSearchVisibility = showSearch ? Visibility.Visible : Visibility.Collapsed;
-        if (SearchButton != null && SearchButton.Visibility != nextSearchVisibility)
-        {
-            SearchButton.Visibility = nextSearchVisibility;
-            Dispatcher.BeginInvoke(new Action(ApplyResponsiveTopBar), DispatcherPriority.Loaded);
-        }
-
-        var dpi = VisualTreeHelper.GetDpi(this);
-        var scale = Math.Max(1.0, dpi.DpiScaleX);
         var countTexts = new[] { TodayCountText, UpcomingCountText, InboxCountText, CompletedCountText };
         var longestCount = countTexts.Max(t => (t.Text ?? string.Empty).Length);
-        var countWidthAllowance = longestCount >= 3 ? 10 : 0;
-        var countThreshold = (scale <= 1.05 ? 82 : 76) + countWidthAllowance;
-        var showCounts = tabCellWidth >= countThreshold;
-        var compact = tabCellWidth < 68;
-        var tight = tabCellWidth < 56;
+        var availableWidth = GetTopTabAvailableWidth();
+        var countWidthAllowance = longestCount >= 3 ? 24 : 0;
+        var showCounts = availableWidth >= 224 + countWidthAllowance;
+        var compact = availableWidth < 240 + countWidthAllowance;
+        var tight = availableWidth < 208 + countWidthAllowance;
         var labelFontSize = tight ? 11.0 : 12.0;
         var countFontSize = tight ? 10.0 : 11.0;
         var tabPadding = tight
-            ? new Thickness(2, 6, 2, 6)
+            ? new Thickness(5, 2, 5, 2)
             : compact
-                ? new Thickness(4, 6, 4, 6)
-                : new Thickness(7, 6, 7, 6);
+                ? new Thickness(6, 2, 6, 2)
+                : new Thickness(8, 2, 8, 2);
+        var tabMinWidth = tight ? 34.0 : 0.0;
 
         var countVis = showCounts ? Visibility.Visible : Visibility.Collapsed;
         foreach (var count in countTexts)
         {
-            count.Visibility = countVis;
-            count.FontSize = countFontSize;
-            count.Margin = compact ? new Thickness(3, 0, 0, 0) : new Thickness(5, 0, 0, 0);
+            var countLineHeight = tight ? 13.0 : 14.0;
+            var countMargin = compact ? new Thickness(3, 0, 0, 0) : new Thickness(5, 0, 0, 0);
+            if (count.Visibility != countVis) count.Visibility = countVis;
+            if (!AreClose(count.FontSize, countFontSize)) count.FontSize = countFontSize;
+            if (!AreClose(count.LineHeight, countLineHeight)) count.LineHeight = countLineHeight;
+            if (count.Margin != countMargin) count.Margin = countMargin;
         }
 
         foreach (var label in new[] { TodayTabLabel, UpcomingTabLabel, InboxTabLabel, CompletedTabLabel })
         {
-            label.FontSize = labelFontSize;
-            label.MaxWidth = Math.Max(26, tabCellWidth - (showCounts ? 28 + countWidthAllowance : 8));
+            var labelLineHeight = tight ? 14.0 : 15.0;
+            if (!AreClose(label.FontSize, labelFontSize)) label.FontSize = labelFontSize;
+            if (!AreClose(label.LineHeight, labelLineHeight)) label.LineHeight = labelLineHeight;
+            if (!double.IsInfinity(label.MaxWidth)) label.MaxWidth = double.PositiveInfinity;
         }
 
         foreach (var tab in TopTabGrid.Children.OfType<ToggleButton>())
         {
-            tab.Padding = tabPadding;
+            if (tab.Padding != tabPadding) tab.Padding = tabPadding;
+            if (!AreClose(tab.MinWidth, tabMinWidth)) tab.MinWidth = tabMinWidth;
         }
+    }
+
+    private static bool AreClose(double left, double right) => Math.Abs(left - right) < 0.1;
+
+    private double GetTopTabAvailableWidth()
+    {
+        return TopTabHostSlot.ActualWidth > 1
+            ? TopTabHostSlot.ActualWidth
+            : Math.Max(0, ActualWidth - 138);
     }
 
     // ===== 底部分类条溢出处理 =====
