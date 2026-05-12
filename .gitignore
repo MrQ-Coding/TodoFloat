@@ -98,3 +98,6 @@ seed_check.png
 *.env.local
 secrets.json
 appsettings.Local.json
+
+# Local test release packages
+Releases-Test/

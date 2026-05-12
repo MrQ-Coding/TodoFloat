@@ -1501,7 +1501,10 @@ public partial class MainWindow : Window
             scale.BeginAnimation(ScaleTransform.ScaleYProperty, anim);
 
             var shouldMoveCompletedSubtask = vm.Model.ParentId is not null && !vm.Completed;
-            var previousSubtaskBounds = shouldMoveCompletedSubtask ? CaptureSubtaskRowBounds() : null;
+            var shouldRestoreOpenSubtask = vm.Model.ParentId is not null && vm.Completed;
+            var previousSubtaskBounds = shouldMoveCompletedSubtask || shouldRestoreOpenSubtask
+                ? CaptureSubtaskRowBounds()
+                : null;
 
             _vm.ToggleCompleteCommand.Execute(vm);
 
@@ -1510,6 +1513,16 @@ public partial class MainWindow : Window
                 Dispatcher.BeginInvoke(new Action(() =>
                 {
                     if (!_vm.MoveCompletedSubtaskToTail(vm)) return;
+
+                    UpdateLayout();
+                    AnimateSubtaskRowsFrom(previousSubtaskBounds);
+                }), DispatcherPriority.ContextIdle);
+            }
+            else if (shouldRestoreOpenSubtask && previousSubtaskBounds is not null)
+            {
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (!_vm.MoveOpenSubtaskToStoredPosition(vm)) return;
 
                     UpdateLayout();
                     AnimateSubtaskRowsFrom(previousSubtaskBounds);
@@ -3086,27 +3099,60 @@ public partial class MainWindow : Window
         return false;
     }
 
-    // ===== 顶栏自适应：窗口越窄，逐级折叠次要元素 =====
-    // 阈值是按"刚好放得下下一档元素"反推的：
-    //   ≥ 500px 全显
-    //   < 500px 隐藏 tab 计数（"待办 6" → "待办"）
-    //   < 360px 再隐藏搜索按钮（设置 / Min / Close 永远保留）
+    // ===== 顶栏自适应：正常按内容宽度，窄窗口时隐藏数量并收紧间距 =====
     private void ApplyResponsiveTopBar()
     {
-        if (TodayCountText == null) return; // 尚未 InitializeComponent
+        if (TodayCountText == null || TopTabGrid == null) return; // 尚未 InitializeComponent
 
-        var w = ActualWidth;
-        var showCounts = w >= 500;
-        var showSearch = w >= 360;
+        var countTexts = new[] { TodayCountText, UpcomingCountText, InboxCountText, CompletedCountText };
+        var longestCount = countTexts.Max(t => (t.Text ?? string.Empty).Length);
+        var availableWidth = GetTopTabAvailableWidth();
+        var countWidthAllowance = longestCount >= 3 ? 24 : 0;
+        var showCounts = availableWidth >= 224 + countWidthAllowance;
+        var compact = availableWidth < 240 + countWidthAllowance;
+        var tight = availableWidth < 208 + countWidthAllowance;
+        var labelFontSize = tight ? 11.0 : 12.0;
+        var countFontSize = tight ? 10.0 : 11.0;
+        var tabPadding = tight
+            ? new Thickness(5, 2, 5, 2)
+            : compact
+                ? new Thickness(6, 2, 6, 2)
+                : new Thickness(8, 2, 8, 2);
+        var tabMinWidth = tight ? 34.0 : 0.0;
 
         var countVis = showCounts ? Visibility.Visible : Visibility.Collapsed;
-        TodayCountText.Visibility = countVis;
-        UpcomingCountText.Visibility = countVis;
-        InboxCountText.Visibility = countVis;
-        CompletedCountText.Visibility = countVis;
+        foreach (var count in countTexts)
+        {
+            var countLineHeight = tight ? 13.0 : 14.0;
+            var countMargin = compact ? new Thickness(3, 0, 0, 0) : new Thickness(5, 0, 0, 0);
+            if (count.Visibility != countVis) count.Visibility = countVis;
+            if (!AreClose(count.FontSize, countFontSize)) count.FontSize = countFontSize;
+            if (!AreClose(count.LineHeight, countLineHeight)) count.LineHeight = countLineHeight;
+            if (count.Margin != countMargin) count.Margin = countMargin;
+        }
 
-        if (SearchButton != null)
-            SearchButton.Visibility = showSearch ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var label in new[] { TodayTabLabel, UpcomingTabLabel, InboxTabLabel, CompletedTabLabel })
+        {
+            var labelLineHeight = tight ? 14.0 : 15.0;
+            if (!AreClose(label.FontSize, labelFontSize)) label.FontSize = labelFontSize;
+            if (!AreClose(label.LineHeight, labelLineHeight)) label.LineHeight = labelLineHeight;
+            if (!double.IsInfinity(label.MaxWidth)) label.MaxWidth = double.PositiveInfinity;
+        }
+
+        foreach (var tab in TopTabGrid.Children.OfType<ToggleButton>())
+        {
+            if (tab.Padding != tabPadding) tab.Padding = tabPadding;
+            if (!AreClose(tab.MinWidth, tabMinWidth)) tab.MinWidth = tabMinWidth;
+        }
+    }
+
+    private static bool AreClose(double left, double right) => Math.Abs(left - right) < 0.1;
+
+    private double GetTopTabAvailableWidth()
+    {
+        return TopTabHostSlot.ActualWidth > 1
+            ? TopTabHostSlot.ActualWidth
+            : Math.Max(0, ActualWidth - 138);
     }
 
     // ===== 底部分类条溢出处理 =====

@@ -9,7 +9,7 @@
     <UseWPF>true</UseWPF>
     <RootNamespace>TodoFloat</RootNamespace>
     <AssemblyName>TodoFloat</AssemblyName>
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
     <StartupObject>TodoFloat.App</StartupObject>
     <EnableSourceControlManagerQueries>false</EnableSourceControlManagerQueries>
   </PropertyGroup>
