@@ -9,14 +9,23 @@
     <UseWPF>true</UseWPF>
     <RootNamespace>TodoFloat</RootNamespace>
     <AssemblyName>TodoFloat</AssemblyName>
-    <Version>1.1.1</Version>
+    <Version>1.1.2</Version>
     <StartupObject>TodoFloat.App</StartupObject>
     <EnableSourceControlManagerQueries>false</EnableSourceControlManagerQueries>
   </PropertyGroup>
 
   <ItemGroup>
     <ApplicationDefinition Remove="App.xaml" />
+    <ApplicationDefinition Remove="InstallerLauncher\**\*.xaml" />
+    <Compile Remove="InstallerLauncher\**\*.cs" />
+    <EmbeddedResource Remove="InstallerLauncher\**\*" />
+    <None Remove="InstallerLauncher\**\*" />
+    <Page Remove="InstallerLauncher\**\*.xaml" />
     <Page Include="App.xaml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="VersionAnnouncement.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

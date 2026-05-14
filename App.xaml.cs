@@ -19,7 +19,10 @@ public partial class App : WpfApplication
     [STAThread]
     public static void Main(string[] args)
     {
-        VelopackApp.Build().Run();
+        VelopackApp.Build()
+            .OnFirstRun(version => VersionAnnouncementService.MarkFirstInstall(version?.ToString()))
+            .OnAfterUpdateFastCallback(version => VersionAnnouncementService.MarkUpdated(version?.ToString()))
+            .Run();
 
         var app = new App();
         app.InitializeComponent();
