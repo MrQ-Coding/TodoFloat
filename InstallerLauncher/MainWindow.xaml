@@ -1,0 +1,137 @@
+<Window x:Class="TodoFloat.InstallerLauncher.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="TodoFloat Setup"
+        Width="620"
+        Height="560"
+        MinWidth="540"
+        MinHeight="500"
+        WindowStartupLocation="CenterScreen"
+        Background="#F6F7FB"
+        FontFamily="Segoe UI">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,20">
+            <TextBlock Text="TodoFloat"
+                       FontSize="30"
+                       FontWeight="SemiBold"
+                       Foreground="#202433"/>
+            <TextBlock Text="安装或修复 TodoFloat"
+                       FontSize="14"
+                       Foreground="#667085"
+                       Margin="1,4,0,0"/>
+        </StackPanel>
+
+        <Border Grid.Row="1"
+                x:Name="StatusPanel"
+                Background="#EEF4FF"
+                BorderBrush="#C7D7FE"
+                BorderThickness="1"
+                CornerRadius="6"
+                Padding="12"
+                Margin="0,0,0,16">
+            <TextBlock x:Name="StatusText"
+                       TextWrapping="Wrap"
+                       Foreground="#1D2939"/>
+        </Border>
+
+        <StackPanel Grid.Row="2" Margin="0,0,0,16">
+            <Grid Margin="0,0,0,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="安装位置"
+                               FontWeight="SemiBold"
+                               Foreground="#344054"
+                               Margin="0,0,0,6"/>
+                    <TextBox x:Name="InstallPathTextBox"
+                             Height="32"
+                             Padding="8,5"
+                             VerticalContentAlignment="Center"/>
+                </StackPanel>
+                <Button Grid.Column="1"
+                        Content="浏览…"
+                        Width="86"
+                        Height="32"
+                        Margin="10,24,0,0"
+                        Click="BrowseInstallButton_Click"/>
+            </Grid>
+
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="数据存储位置"
+                               FontWeight="SemiBold"
+                               Foreground="#344054"
+                               Margin="0,0,0,6"/>
+                    <TextBox x:Name="DataPathTextBox"
+                             Height="32"
+                             Padding="8,5"
+                             VerticalContentAlignment="Center"/>
+                </StackPanel>
+                <Button Grid.Column="1"
+                        Content="浏览…"
+                        Width="86"
+                        Height="32"
+                        Margin="10,24,0,0"
+                        Click="BrowseDataButton_Click"/>
+            </Grid>
+        </StackPanel>
+
+        <StackPanel Grid.Row="3">
+            <TextBlock Text="版本公告"
+                       FontWeight="SemiBold"
+                       Foreground="#344054"
+                       Margin="0,0,0,6"/>
+            <TextBox x:Name="AnnouncementTextBox"
+                     IsReadOnly="True"
+                     TextWrapping="Wrap"
+                     AcceptsReturn="True"
+                     VerticalScrollBarVisibility="Auto"
+                     Padding="10"
+                     MinHeight="120"/>
+        </StackPanel>
+
+        <ProgressBar Grid.Row="4"
+                     x:Name="InstallProgress"
+                     Height="8"
+                     Margin="0,16,0,0"
+                     IsIndeterminate="True"
+                     Visibility="Collapsed"/>
+
+        <DockPanel Grid.Row="5" Margin="0,18,0,0">
+            <CheckBox x:Name="LaunchAfterInstallCheckBox"
+                      DockPanel.Dock="Left"
+                      Content="安装完成后启动 TodoFloat"
+                      VerticalAlignment="Center"
+                      IsChecked="True"/>
+            <StackPanel DockPanel.Dock="Right"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Right">
+                <Button x:Name="InstallButton"
+                        Content="安装"
+                        Width="96"
+                        Height="32"
+                        Margin="0,0,8,0"
+                        Click="InstallButton_Click"/>
+                <Button Content="取消"
+                        Width="86"
+                        Height="32"
+                        Click="CancelButton_Click"/>
+            </StackPanel>
+        </DockPanel>
+    </Grid>
+</Window>

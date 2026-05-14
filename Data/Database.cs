@@ -6,20 +6,27 @@ namespace TodoFloat.Data;
 public static class Database
 {
     private static string? _dbPath;
+    private const string DataPathFileName = "data-path.txt";
 
     public static string DbPath
     {
         get
         {
             if (_dbPath != null) return _dbPath;
-            var dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "TodoFloat");
+            var dir = ResolveDataDirectory();
             Directory.CreateDirectory(dir);
             _dbPath = Path.Combine(dir, "todo.db");
             return _dbPath;
         }
     }
+
+    public static string DataDirectory => Path.GetDirectoryName(DbPath)!;
+
+    public static string DefaultDataDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "TodoFloat");
+
+    public static string DataPathConfigPath => GetDataPathConfigPath();
 
     public static SqliteConnection Open()
     {
@@ -34,6 +41,52 @@ public static class Database
         using var cmd = conn.CreateCommand();
         cmd.CommandText = Schema;
         cmd.ExecuteNonQuery();
+    }
+
+    public static void SetDataDirectory(string directory)
+    {
+        var normalized = Path.GetFullPath(Environment.ExpandEnvironmentVariables(directory.Trim()));
+        Directory.CreateDirectory(normalized);
+        File.WriteAllText(GetDataPathConfigPath(), normalized);
+        _dbPath = Path.Combine(normalized, "todo.db");
+    }
+
+    public static void Checkpoint()
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+        cmd.ExecuteNonQuery();
+    }
+
+    private static string ResolveDataDirectory()
+    {
+        var fromEnvironment = Environment.GetEnvironmentVariable("TODOFLOAT_DATA_DIR");
+        if (!string.IsNullOrWhiteSpace(fromEnvironment))
+        {
+            return Environment.ExpandEnvironmentVariables(fromEnvironment.Trim());
+        }
+
+        var configPath = GetDataPathConfigPath();
+        if (File.Exists(configPath))
+        {
+            var configured = File.ReadAllText(configPath).Trim();
+            if (!string.IsNullOrWhiteSpace(configured))
+            {
+                return Environment.ExpandEnvironmentVariables(configured);
+            }
+        }
+
+        return DefaultDataDirectory;
+    }
+
+    private static string GetDataPathConfigPath()
+    {
+        var configDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "TodoFloat.config");
+        Directory.CreateDirectory(configDir);
+        return Path.Combine(configDir, DataPathFileName);
     }
 
     private const string Schema = @"

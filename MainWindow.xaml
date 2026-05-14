@@ -157,6 +157,9 @@
                                           IsChecked="{Binding AutoHideEnabled}"
                                           Command="{Binding ToggleAutoHideCommand}"/>
                                 <MenuItem Header="检查更新…" Click="MenuCheckUpdates_Click"/>
+                                <MenuItem Header="查看版本…" Click="MenuShowVersion_Click"/>
+                                <MenuItem Header="查看版本公告…" Click="MenuShowVersionAnnouncement_Click"/>
+                                <MenuItem Header="数据存储位置…" Click="MenuDataStorage_Click"/>
                                 <Separator/>
                                 <MenuItem Header="分类管理…" Click="MenuCategories_Click"/>
                             </ContextMenu>

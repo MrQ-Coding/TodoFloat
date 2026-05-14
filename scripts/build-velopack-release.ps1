@@ -6,6 +6,7 @@ param(
     [string]$PackTitle = "TodoFloat",
     [string]$RepoUrl = "https://github.com/MrQ-Coding/TodoFloat",
     [string]$OutputDir = "",
+    [switch]$SkipLauncher,
     [switch]$UploadToGitHub,
     [switch]$Publish,
     [string]$GitHubToken = $env:GITHUB_TOKEN
@@ -15,6 +16,7 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $projectPath = Join-Path $repoRoot "TodoFloat.csproj"
+$launcherProjectPath = Join-Path $repoRoot "InstallerLauncher\TodoFloat.InstallerLauncher.csproj"
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
     [xml]$project = Get-Content -LiteralPath $projectPath
@@ -57,6 +59,38 @@ Write-Host "Packing Velopack release..."
     --mainExe "TodoFloat.exe" `
     --runtime $Runtime `
     --outputDir $OutputDir
+
+if (-not $SkipLauncher) {
+    $setupExe = Get-ChildItem -LiteralPath $OutputDir -Filter "*-Setup.exe" |
+        Sort-Object LastWriteTimeUtc -Descending |
+        Select-Object -First 1
+
+    if ($setupExe -eq $null) {
+        throw "Velopack Setup.exe was not found in $OutputDir."
+    }
+
+    $launcherPublishDir = Join-Path $repoRoot "publish\setup-launcher-$Runtime"
+    if (Test-Path -LiteralPath $launcherPublishDir) {
+        Remove-Item -LiteralPath $launcherPublishDir -Recurse -Force
+    }
+
+    Write-Host "Publishing custom setup launcher..."
+    & dotnet publish $launcherProjectPath `
+        -c $Configuration `
+        -r $Runtime `
+        --self-contained true `
+        -o $launcherPublishDir `
+        /p:Version=$Version `
+        /p:PublishSingleFile=true `
+        /p:EmbeddedSetupPath="$($setupExe.FullName)"
+
+    $launcherExe = Join-Path $launcherPublishDir "TodoFloatSetup.exe"
+    if (-not (Test-Path -LiteralPath $launcherExe)) {
+        throw "Custom setup launcher was not created: $launcherExe"
+    }
+
+    Copy-Item -LiteralPath $launcherExe -Destination (Join-Path $OutputDir "TodoFloatSetup.exe") -Force
+}
 
 if ($UploadToGitHub) {
     if ([string]::IsNullOrWhiteSpace($GitHubToken)) {

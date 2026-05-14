@@ -24,6 +24,7 @@ public sealed record UpdateCheckResult(
 public sealed class UpdateService
 {
     private const string RepoUrl = "https://github.com/MrQ-Coding/TodoFloat";
+    public const string ReleasesUrl = RepoUrl + "/releases";
 
     public async Task<UpdateCheckResult> CheckForUpdatesAsync(CancellationToken cancellationToken = default)
     {
@@ -90,6 +91,41 @@ public sealed class UpdateService
     {
         var manager = CreateManager();
         manager.ApplyUpdatesAndRestart(targetRelease, Array.Empty<string>());
+    }
+
+    public bool IsInstalled()
+    {
+        try
+        {
+            return CreateManager().IsInstalled;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public string GetCurrentVersionText()
+    {
+        try
+        {
+            return ToDisplayVersion(CreateManager().CurrentVersion) ?? GetAssemblyVersionText();
+        }
+        catch
+        {
+            return GetAssemblyVersionText();
+        }
+    }
+
+    public static string GetReleaseNotesUrl(string? version)
+    {
+        if (string.IsNullOrWhiteSpace(version) || version.Equals("unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            return ReleasesUrl;
+        }
+
+        var tag = version.StartsWith('v') ? version : $"v{version}";
+        return $"{ReleasesUrl}/tag/{tag}";
     }
 
     private static UpdateManager CreateManager()

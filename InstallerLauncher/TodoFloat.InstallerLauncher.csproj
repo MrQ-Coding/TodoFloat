@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>TodoFloatSetup</AssemblyName>
+    <RootNamespace>TodoFloat.InstallerLauncher</RootNamespace>
+    <Version>1.1.2</Version>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\VersionAnnouncement.txt"
+                      Link="VersionAnnouncement.txt"
+                      LogicalName="VersionAnnouncement.txt" />
+    <EmbeddedResource Include="$(EmbeddedSetupPath)"
+                      LogicalName="VelopackSetup.exe"
+                      Condition="'$(EmbeddedSetupPath)' != ''" />
+  </ItemGroup>
+
+</Project>

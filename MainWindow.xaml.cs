@@ -1,4 +1,5 @@
 using System.Linq;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Windows;
@@ -135,6 +136,7 @@ public partial class MainWindow : Window
             HookCategoryOverflowPanel();
             ApplySavedTopTabOrder();
             ApplyResponsiveTopBar();
+            ShowPendingVersionAnnouncement();
         };
     }
 
@@ -2684,6 +2686,211 @@ public partial class MainWindow : Window
         }
     }
 
+    private void MenuShowVersion_Click(object sender, RoutedEventArgs e)
+    {
+        var updateService = new UpdateService();
+        var installState = updateService.IsInstalled() ? "安装版" : "便携/调试版";
+        var message = $"TodoFloat\n版本：{updateService.GetCurrentVersionText()}\n运行方式：{installState}";
+        MessageBox.Show(this, message, "版本信息", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void MenuShowVersionAnnouncement_Click(object sender, RoutedEventArgs e)
+    {
+        var updateService = new UpdateService();
+        ShowVersionAnnouncementDialog(updateService.GetCurrentVersionText(), StartupNoticeKind.Update);
+    }
+
+    private void MenuDataStorage_Click(object sender, RoutedEventArgs e)
+    {
+        ShowDataStorageDialog();
+    }
+
+    private void ShowDataStorageDialog()
+    {
+        var storage = new DataStorageService();
+        var dialog = new Window
+        {
+            Title = "数据存储位置",
+            Owner = this,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            ResizeMode = ResizeMode.CanResize,
+            Width = 520,
+            Height = 330,
+            MinWidth = 440,
+            MinHeight = 300,
+            Background = Background
+        };
+
+        var root = new Grid { Margin = new Thickness(16) };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var heading = new TextBlock
+        {
+            Text = "数据存储位置",
+            FontSize = 16,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 12)
+        };
+        Grid.SetRow(heading, 0);
+
+        var current = new TextBox
+        {
+            Text = $"当前位置：{storage.CurrentDataDirectory}",
+            IsReadOnly = true,
+            TextWrapping = TextWrapping.Wrap,
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(10),
+            Margin = new Thickness(0, 0, 0, 12)
+        };
+        Grid.SetRow(current, 1);
+
+        var picker = new Grid { Margin = new Thickness(0, 0, 0, 10) };
+        picker.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        picker.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var targetTextBox = new TextBox
+        {
+            Text = storage.CurrentDataDirectory,
+            Height = 32,
+            Padding = new Thickness(8, 5, 8, 5),
+            VerticalContentAlignment = VerticalAlignment.Center
+        };
+        Grid.SetColumn(targetTextBox, 0);
+
+        var browseButton = new Button
+        {
+            Content = "浏览…",
+            Width = 86,
+            Height = 32,
+            Margin = new Thickness(10, 0, 0, 0)
+        };
+        browseButton.Click += (_, _) =>
+        {
+            if (TryBrowseFolder("选择 TodoFloat 数据存储位置", targetTextBox.Text, out var selected))
+            {
+                targetTextBox.Text = selected;
+            }
+        };
+        Grid.SetColumn(browseButton, 1);
+
+        picker.Children.Add(targetTextBox);
+        picker.Children.Add(browseButton);
+        Grid.SetRow(picker, 2);
+
+        var migrateCheckBox = new CheckBox
+        {
+            Content = "迁移当前数据到新位置",
+            IsChecked = true,
+            VerticalAlignment = VerticalAlignment.Top
+        };
+        Grid.SetRow(migrateCheckBox, 3);
+
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 12, 0, 0)
+        };
+        Grid.SetRow(buttons, 4);
+
+        var applyButton = new Button
+        {
+            Content = "应用",
+            Width = 86,
+            Height = 30,
+            Margin = new Thickness(0, 0, 8, 0),
+            IsDefault = true
+        };
+        applyButton.Click += (_, _) =>
+        {
+            ApplyDataStorageChange(dialog, storage, targetTextBox.Text, migrateCheckBox.IsChecked == true);
+        };
+
+        var cancelButton = new Button
+        {
+            Content = "取消",
+            Width = 86,
+            Height = 30,
+            IsCancel = true
+        };
+        cancelButton.Click += (_, _) => dialog.Close();
+
+        buttons.Children.Add(applyButton);
+        buttons.Children.Add(cancelButton);
+
+        root.Children.Add(heading);
+        root.Children.Add(current);
+        root.Children.Add(picker);
+        root.Children.Add(migrateCheckBox);
+        root.Children.Add(buttons);
+        dialog.Content = root;
+        dialog.ShowDialog();
+    }
+
+    private void ApplyDataStorageChange(Window dialog, DataStorageService storage, string targetDirectory, bool migrate)
+    {
+        if (string.IsNullOrWhiteSpace(targetDirectory))
+        {
+            MessageBox.Show(dialog, "请选择数据存储位置。", "数据存储位置", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (migrate
+            && !storage.IsCurrentDataDirectory(targetDirectory)
+            && storage.TargetHasExistingDatabase(targetDirectory))
+        {
+            var overwrite = MessageBox.Show(
+                dialog,
+                "目标位置已有 todo.db。\n继续后会先备份目标数据库，再迁移当前数据。",
+                "数据迁移",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (overwrite != MessageBoxResult.Yes) return;
+        }
+
+        try
+        {
+            var result = storage.SwitchDataDirectory(targetDirectory, migrate);
+            _vm.ReloadAll();
+            var message = $"数据位置已更新：\n{storage.CurrentDataDirectory}";
+            if (!string.IsNullOrWhiteSpace(result.CleanupWarning))
+            {
+                message += $"\n\n注意：{result.CleanupWarning}";
+            }
+
+            MessageBox.Show(dialog, message, "数据存储位置", MessageBoxButton.OK, MessageBoxImage.Information);
+            dialog.Close();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(dialog, $"数据位置更新失败：\n{ex.Message}", "数据存储位置", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private static bool TryBrowseFolder(string description, string currentPath, out string selectedPath)
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = description,
+            InitialDirectory = Directory.Exists(currentPath)
+                ? currentPath
+                : Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            selectedPath = dialog.FolderName;
+            return true;
+        }
+
+        selectedPath = string.Empty;
+        return false;
+    }
+
     private async void MenuCheckUpdates_Click(object sender, RoutedEventArgs e)
     {
         var menuItem = sender as MenuItem;
@@ -2828,6 +3035,86 @@ public partial class MainWindow : Window
             vm.DraftSubtaskTitle = string.Empty;
             vm.IsAddingSubtask = true;
         }
+    }
+
+    private void ShowPendingVersionAnnouncement()
+    {
+        var notice = VersionAnnouncementService.ConsumePendingNotice();
+        if (notice is null) return;
+
+        ShowVersionAnnouncementDialog(notice.Version, notice.Kind);
+    }
+
+    private void ShowVersionAnnouncementDialog(string? version, StartupNoticeKind kind = StartupNoticeKind.Update)
+    {
+        var titleText = string.IsNullOrWhiteSpace(version)
+            ? "版本公告"
+            : kind == StartupNoticeKind.FirstInstall
+                ? $"安装完成 {version}"
+                : $"已更新到 {version}";
+
+        var dialog = new Window
+        {
+            Title = "版本公告",
+            Owner = this,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            ResizeMode = ResizeMode.CanResize,
+            Width = 420,
+            Height = 360,
+            MinWidth = 320,
+            MinHeight = 240,
+            Background = Background,
+            Content = CreateAnnouncementContent(titleText, VersionAnnouncementService.GetAnnouncementContent())
+        };
+
+        dialog.ShowDialog();
+    }
+
+    private static UIElement CreateAnnouncementContent(string title, string content)
+    {
+        var root = new Grid { Margin = new Thickness(16) };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var heading = new TextBlock
+        {
+            Text = title,
+            FontSize = 16,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 12)
+        };
+        Grid.SetRow(heading, 0);
+
+        var text = new TextBox
+        {
+            Text = content,
+            IsReadOnly = true,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(10),
+            AcceptsReturn = true
+        };
+        Grid.SetRow(text, 1);
+
+        var closeButton = new Button
+        {
+            Content = "关闭",
+            Width = 86,
+            Height = 30,
+            Margin = new Thickness(0, 12, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            IsDefault = true,
+            IsCancel = true
+        };
+        closeButton.Click += (_, _) => Window.GetWindow(closeButton)?.Close();
+        Grid.SetRow(closeButton, 2);
+
+        root.Children.Add(heading);
+        root.Children.Add(text);
+        root.Children.Add(closeButton);
+        return root;
     }
 
     private void TaskTitle_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
