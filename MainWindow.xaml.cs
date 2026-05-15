@@ -90,6 +90,8 @@ public partial class MainWindow : Window
     private DispatcherTimer? _subtaskEditResetTimer;
     private Views.DesktopPetWindow? _desktopPetWindow;
     private bool _desktopPetPositionInitialized;
+    private bool _startupUiInitialized;
+    private bool _startupNoticeChecked;
     private bool _isHidden;
     private bool _isAnimating;
 
@@ -124,6 +126,21 @@ public partial class MainWindow : Window
 
         Loaded += (_, _) =>
         {
+            InitializeStartupUi(showPendingAnnouncement: true);
+        };
+    }
+
+    public void StartWithDesktopPet()
+    {
+        InitializeStartupUi(showPendingAnnouncement: false);
+        _isHidden = true;
+        ShowDesktopPet();
+    }
+
+    private void InitializeStartupUi(bool showPendingAnnouncement)
+    {
+        if (!_startupUiInitialized)
+        {
             // 启动时如果还是最大化态（上次崩了或异常），先还原避免锁死
             if (WindowState == WindowState.Maximized) WindowState = WindowState.Normal;
             RestoreWindowBounds();
@@ -131,8 +148,14 @@ public partial class MainWindow : Window
             ApplySavedTopTabOrder();
             ApplyResponsiveTopBar();
             UpdateDesktopPetVisibility();
+            _startupUiInitialized = true;
+        }
+
+        if (showPendingAnnouncement && !_startupNoticeChecked)
+        {
+            _startupNoticeChecked = true;
             ShowPendingVersionAnnouncement();
-        };
+        }
     }
 
     private void MainWindow_SourceInitialized(object? sender, EventArgs e)
@@ -253,6 +276,7 @@ public partial class MainWindow : Window
         SaveBounds();
         _isHidden = true;
         Hide();
+        Opacity = 1;
         UpdateDesktopPetVisibility();
     }
 
@@ -262,8 +286,10 @@ public partial class MainWindow : Window
 
         _isAnimating = false;
         _isHidden = false;
+        Opacity = 1;
         Show();
         Activate();
+        InitializeStartupUi(showPendingAnnouncement: true);
         UpdateDesktopPetVisibility();
     }
 
@@ -295,9 +321,18 @@ public partial class MainWindow : Window
     private Views.DesktopPetWindow CreateDesktopPetWindow()
     {
         var pet = new Views.DesktopPetWindow();
+        pet.TodoItemsProvider = GetDesktopPetTodoItems;
         pet.ActivateRequested += (_, _) => ToggleSidebarFromDesktopPet();
         pet.PositionChangedByDrag += (_, _) => SaveDesktopPetPosition();
         return pet;
+    }
+
+    private IReadOnlyList<Views.DesktopPetTodoItem> GetDesktopPetTodoItems()
+    {
+        return _vm.Tasks
+            .Take(4)
+            .Select(t => new Views.DesktopPetTodoItem(t.Title, t.Completed))
+            .ToList();
     }
 
     private void ToggleSidebarFromDesktopPet()
@@ -330,8 +365,8 @@ public partial class MainWindow : Window
 
         if (double.IsNaN(savedLeft) || double.IsNaN(savedTop))
         {
-            savedLeft = Left + Math.Max(0, (Width - _desktopPetWindow.Width) / 2);
-            savedTop = workArea.Top + 4;
+            savedLeft = workArea.Right - _desktopPetWindow.Width - 20;
+            savedTop = workArea.Bottom - _desktopPetWindow.Height - 20;
         }
 
         _desktopPetWindow.Left = Clamp(savedLeft, workArea.Left, workArea.Right - _desktopPetWindow.Width);

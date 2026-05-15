@@ -60,7 +60,15 @@ public partial class App : WpfApplication
         Reminders.Start();
 
         var win = new MainWindow(TodoApi);
-        win.Show();
+        MainWindow = win;
+        if (Settings.AutoHide)
+        {
+            win.StartWithDesktopPet();
+        }
+        else
+        {
+            win.Show();
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)

@@ -33,7 +33,7 @@ public class SettingsService
 
     public bool AutoHide
     {
-        get => _repo.Get("autohide") == "1";
+        get => _repo.Get("autohide") != "0";
         set => _repo.Set("autohide", value ? "1" : "0");
     }
 
