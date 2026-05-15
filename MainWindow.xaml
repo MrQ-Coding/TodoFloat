@@ -152,7 +152,7 @@
                             Click="BtnSettings_Click">
                         <Button.ContextMenu>
                             <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                                <MenuItem Header="自动隐藏"
+                                <MenuItem Header="桌面宠物"
                                           IsCheckable="True"
                                           IsChecked="{Binding AutoHideEnabled}"
                                           Command="{Binding ToggleAutoHideCommand}"/>
