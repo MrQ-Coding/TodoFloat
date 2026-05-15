@@ -37,10 +37,16 @@ public class SettingsService
         set => _repo.Set("autohide", value ? "1" : "0");
     }
 
-    public string SnapEdge
+    public double DesktopPetLeft
     {
-        get => _repo.Get("snap.edge") ?? "right";
-        set => _repo.Set("snap.edge", value);
+        get => GetDouble("desktop.pet.left", double.NaN);
+        set => SetDouble("desktop.pet.left", value);
+    }
+
+    public double DesktopPetTop
+    {
+        get => GetDouble("desktop.pet.top", double.NaN);
+        set => SetDouble("desktop.pet.top", value);
     }
 
     public bool ShowCompleted

@@ -87,13 +87,11 @@ public partial class MainWindow : Window
     private readonly ITodoApi _todoApi;
     private readonly SettingsService _settings = App.Settings;
     private readonly DispatcherTimer _saveDebounce;
-    private readonly DispatcherTimer _autoHideTimer;
     private DispatcherTimer? _subtaskEditResetTimer;
+    private Views.DesktopPetWindow? _desktopPetWindow;
+    private bool _desktopPetPositionInitialized;
     private bool _isHidden;
     private bool _isAnimating;
-    // 顶部贴边：贴边后露出 2px 当作"勾住"的边沿；TriggerSize 略大让指针更容易唤醒
-    private const double PeekSize = 2;
-    private const double TriggerSize = 4;
 
     public MainWindow()
         : this(TodoApiFactory.CreateDefault())
@@ -106,6 +104,7 @@ public partial class MainWindow : Window
         _todoApi = todoApi;
         _vm = new MainViewModel(_settings, _todoApi);
         DataContext = _vm;
+        _vm.PropertyChanged += MainViewModel_PropertyChanged;
         AddHandler(
             UIElement.PreviewMouseDownEvent,
             new MouseButtonEventHandler(TopTab_PreviewMouseDown),
@@ -113,10 +112,6 @@ public partial class MainWindow : Window
 
         _saveDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
         _saveDebounce.Tick += (_, _) => { _saveDebounce.Stop(); SaveBounds(); };
-
-        // 25ms 轮询：~40Hz，几乎跟刷新率同步，鼠标到顶立刻感知
-        _autoHideTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(25) };
-        _autoHideTimer.Tick += AutoHideTick;
 
         SourceInitialized += MainWindow_SourceInitialized;
         LocationChanged += (_, _) => _saveDebounce.Restart();
@@ -132,10 +127,10 @@ public partial class MainWindow : Window
             // 启动时如果还是最大化态（上次崩了或异常），先还原避免锁死
             if (WindowState == WindowState.Maximized) WindowState = WindowState.Normal;
             RestoreWindowBounds();
-            _autoHideTimer.Start();
             HookCategoryOverflowPanel();
             ApplySavedTopTabOrder();
             ApplyResponsiveTopBar();
+            UpdateDesktopPetVisibility();
             ShowPendingVersionAnnouncement();
         };
     }
@@ -153,6 +148,19 @@ public partial class MainWindow : Window
         {
             var pref = DWMWCP_ROUND;
             DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref pref, sizeof(int));
+        }
+    }
+
+    private void MainViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainViewModel.AutoHideEnabled))
+        {
+            if (!_vm.AutoHideEnabled && _isHidden)
+            {
+                ShowSidebar();
+            }
+
+            UpdateDesktopPetVisibility();
         }
     }
 
@@ -217,7 +225,7 @@ public partial class MainWindow : Window
         // 兜底：万一窗口不知怎么进了最大化态，先还原才能 DragMove
         if (WindowState == WindowState.Maximized) WindowState = WindowState.Normal;
         try { DragMove(); } catch { /* drag race */ }
-        SnapToEdge();
+        SaveMovedBounds();
     }
 
     private bool IsInDragBar(DependencyObject? d)
@@ -233,111 +241,125 @@ public partial class MainWindow : Window
         return false;
     }
 
-    private void SnapToEdge()
+    private void SaveMovedBounds()
     {
-        var wa = SystemParameters.WorkArea;
-        const double snapDistance = 24;
-        // 仅检测顶部贴边（左右贴边已废弃）
-        if (Math.Abs(Top - wa.Top) < snapDistance)
-        {
-            Top = wa.Top;
-            _settings.SnapEdge = "top";
-        }
-        else
-        {
-            _settings.SnapEdge = "none";
-        }
         SaveBounds();
     }
 
-    private int _awayTicks;
-    private const int HideAfterTicks = 8; // ~200ms at 25ms interval（保留一点防误触）
-
-    private void AutoHideTick(object? sender, EventArgs e)
-    {
-        if (!_vm.AutoHideEnabled || _settings.SnapEdge != "top")
-        {
-            if (_isHidden) ShowSidebar();
-            _awayTicks = 0;
-            return;
-        }
-        if (_isAnimating) return;
-
-        var wa = SystemParameters.WorkArea;
-
-        if (!GetCursorPos(out var p)) return;
-        var dpi = VisualTreeHelper.GetDpi(this);
-        var mx = p.X / dpi.DpiScaleX;
-        var my = p.Y / dpi.DpiScaleY;
-
-        // 显示态时窗口的可见区域：贴顶 → 顶部坐标 = wa.Top
-        double visTop = wa.Top;
-        double visBottom = visTop + Height;
-
-        var overVisibleArea = mx >= Left - 2 && mx <= Left + Width + 2 && my >= visTop - 2 && my <= visBottom + 2;
-        var keyboardFocus = IsKeyboardFocusWithin || IsActive;
-
-        // 触发条带：屏幕顶 TriggerSize 像素，且横向在窗口宽度范围内
-        bool inTriggerZone = my <= wa.Top + TriggerSize && mx >= Left && mx <= Left + Width;
-
-        if (!_isHidden)
-        {
-            if (overVisibleArea || keyboardFocus || inTriggerZone)
-            {
-                _awayTicks = 0;
-            }
-            else if (++_awayTicks >= HideAfterTicks)
-            {
-                HideSidebar(_settings.SnapEdge);
-            }
-        }
-        else
-        {
-            if (inTriggerZone) ShowSidebar();
-        }
-    }
-
-    private void HideSidebar(string edge)
+    private void HideSidebar()
     {
         if (_isHidden || _isAnimating) return;
-        _isAnimating = true;
-        var wa = SystemParameters.WorkArea;
-        // 顶部贴边：把整窗向上推，只在屏幕顶部留 PeekSize 高度
-        var target = wa.Top - Height + PeekSize;
-        var anim = new DoubleAnimation
-        {
-            From = Top,
-            To = target,
-            Duration = TimeSpan.FromMilliseconds(70),
-            EasingFunction = new System.Windows.Media.Animation.QuadraticEase { EasingMode = EasingMode.EaseOut }
-        };
-        anim.Completed += (_, _) => { _isAnimating = false; _isHidden = true; };
-        BeginAnimation(TopProperty, anim);
+
+        SaveBounds();
+        _isHidden = true;
+        Hide();
+        UpdateDesktopPetVisibility();
     }
 
     private void ShowSidebar()
     {
         if (!_isHidden && !_isAnimating) return;
-        _isAnimating = true;
-        var wa = SystemParameters.WorkArea;
-        var target = wa.Top;
-        var anim = new DoubleAnimation
-        {
-            From = Top,
-            To = target,
-            Duration = TimeSpan.FromMilliseconds(70),
-            EasingFunction = new System.Windows.Media.Animation.QuadraticEase { EasingMode = EasingMode.EaseOut }
-        };
-        anim.Completed += (_, _) =>
-        {
-            _isAnimating = false;
-            _isHidden = false;
-            BeginAnimation(TopProperty, null);
-            Top = target;
-            _awayTicks = 0;
-        };
-        BeginAnimation(TopProperty, anim);
+
+        _isAnimating = false;
+        _isHidden = false;
+        Show();
+        Activate();
+        UpdateDesktopPetVisibility();
     }
+
+    private void UpdateDesktopPetVisibility()
+    {
+        if (_vm.AutoHideEnabled)
+        {
+            ShowDesktopPet();
+        }
+        else
+        {
+            HideDesktopPet();
+        }
+    }
+
+    private void ShowDesktopPet()
+    {
+        _desktopPetWindow ??= CreateDesktopPetWindow();
+        EnsureDesktopPetPlacement();
+
+        if (!_desktopPetWindow.IsVisible)
+        {
+            _desktopPetWindow.Show();
+        }
+
+        _desktopPetWindow.KeepOnTop();
+    }
+
+    private Views.DesktopPetWindow CreateDesktopPetWindow()
+    {
+        var pet = new Views.DesktopPetWindow();
+        pet.ActivateRequested += (_, _) => ToggleSidebarFromDesktopPet();
+        pet.PositionChangedByDrag += (_, _) => SaveDesktopPetPosition();
+        return pet;
+    }
+
+    private void ToggleSidebarFromDesktopPet()
+    {
+        if (_isAnimating) return;
+        if (!_vm.AutoHideEnabled) return;
+
+        if (_isHidden)
+        {
+            ShowSidebar();
+        }
+        else
+        {
+            HideSidebar();
+        }
+    }
+
+    private void HideDesktopPet()
+    {
+        _desktopPetWindow?.Hide();
+    }
+
+    private void EnsureDesktopPetPlacement()
+    {
+        if (_desktopPetWindow is null || _desktopPetPositionInitialized) return;
+
+        var workArea = GetVirtualScreenBounds();
+        var savedLeft = _settings.DesktopPetLeft;
+        var savedTop = _settings.DesktopPetTop;
+
+        if (double.IsNaN(savedLeft) || double.IsNaN(savedTop))
+        {
+            savedLeft = Left + Math.Max(0, (Width - _desktopPetWindow.Width) / 2);
+            savedTop = workArea.Top + 4;
+        }
+
+        _desktopPetWindow.Left = Clamp(savedLeft, workArea.Left, workArea.Right - _desktopPetWindow.Width);
+        _desktopPetWindow.Top = Clamp(savedTop, workArea.Top, workArea.Bottom - _desktopPetWindow.Height);
+        _desktopPetPositionInitialized = true;
+    }
+
+    private void SaveDesktopPetPosition()
+    {
+        if (_desktopPetWindow is null) return;
+
+        var workArea = GetVirtualScreenBounds();
+        _desktopPetWindow.Left = Clamp(_desktopPetWindow.Left, workArea.Left, workArea.Right - _desktopPetWindow.Width);
+        _desktopPetWindow.Top = Clamp(_desktopPetWindow.Top, workArea.Top, workArea.Bottom - _desktopPetWindow.Height);
+        _desktopPetWindow.KeepOnTop();
+        _settings.DesktopPetLeft = _desktopPetWindow.Left;
+        _settings.DesktopPetTop = _desktopPetWindow.Top;
+    }
+
+    private static Rect GetVirtualScreenBounds() =>
+        new(
+            SystemParameters.VirtualScreenLeft,
+            SystemParameters.VirtualScreenTop,
+            SystemParameters.VirtualScreenWidth,
+            SystemParameters.VirtualScreenHeight);
+
+    private static double Clamp(double value, double min, double max) =>
+        Math.Min(max, Math.Max(min, value));
 
     private void NewTaskBox_KeyDown(object sender, KeyEventArgs e)
     {
@@ -3245,17 +3267,14 @@ public partial class MainWindow : Window
 
     private void MainWindow_StateChanged(object? sender, EventArgs e)
     {
-        // 拖到屏幕顶端时 Windows 会用 Aero Snap 强制最大化，跟我们自己的"顶部贴边"
-        // 撞车 —— 最大化态下 DragMove 不工作、ResizeMode 也失灵。
-        // 拦下来：立刻还原 Normal，并替我们自己执行一次顶部贴边。
         if (WindowState == WindowState.Maximized)
         {
             WindowState = WindowState.Normal;
             var wa = SystemParameters.WorkArea;
-            Top = wa.Top;
             if (Left < wa.Left) Left = wa.Left;
             if (Left + Width > wa.Right) Left = wa.Right - Width;
-            _settings.SnapEdge = "top";
+            if (Top < wa.Top) Top = wa.Top;
+            if (Top + Height > wa.Bottom) Top = wa.Bottom - Height;
             SaveBounds();
             return;
         }
@@ -3299,21 +3318,17 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
+        _vm.PropertyChanged -= MainViewModel_PropertyChanged;
         ClearTopTabPendingDrag();
         FinishTopTabDrag(commit: false);
         FinishSubtaskDrag(commit: false);
         FinishTaskDrag(commit: false);
         SaveBounds();
         _subtaskEditResetTimer?.Stop();
-        _autoHideTimer.Stop();
+        _desktopPetWindow?.Close();
     }
 
     // --- Win32 ---
-    [StructLayout(LayoutKind.Sequential)]
-    private struct POINT { public int X; public int Y; }
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetCursorPos(out POINT lpPoint);
     [DllImport("user32.dll")]
     private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
     [DllImport("user32.dll")]
