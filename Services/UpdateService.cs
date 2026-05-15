@@ -24,6 +24,7 @@ public sealed record UpdateCheckResult(
 public sealed class UpdateService
 {
     private const string RepoUrl = "https://github.com/MrQ-Coding/TodoFloat";
+    private static readonly TimeSpan UpdateCheckTimeout = TimeSpan.FromSeconds(20);
     public const string ReleasesUrl = RepoUrl + "/releases";
 
     public async Task<UpdateCheckResult> CheckForUpdatesAsync(CancellationToken cancellationToken = default)
@@ -47,7 +48,7 @@ public sealed class UpdateService
                     PendingRestart: pending);
             }
 
-            var updateInfo = await manager.CheckForUpdatesAsync();
+            var updateInfo = await CheckForUpdatesWithTimeoutAsync(manager, cancellationToken);
             if (updateInfo is null)
             {
                 return new UpdateCheckResult(UpdateCheckStatus.UpToDate, currentText);
@@ -132,6 +133,22 @@ public sealed class UpdateService
     {
         var source = new GithubSource(RepoUrl, string.Empty, false, null!);
         return new UpdateManager(source, null!, null!);
+    }
+
+    private static async Task<UpdateInfo?> CheckForUpdatesWithTimeoutAsync(
+        UpdateManager manager,
+        CancellationToken cancellationToken)
+    {
+        var checkTask = manager.CheckForUpdatesAsync();
+        var timeoutTask = Task.Delay(UpdateCheckTimeout, cancellationToken);
+        var completedTask = await Task.WhenAny(checkTask, timeoutTask);
+
+        if (completedTask == timeoutTask)
+        {
+            throw new TimeoutException("检查更新超时，请稍后重试。");
+        }
+
+        return await checkTask;
     }
 
     private static string? ToDisplayVersion(object? version)
